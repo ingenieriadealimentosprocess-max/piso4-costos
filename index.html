@@ -1,0 +1,1341 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sistema de Costeo · Piso Cuatro</title>
+<style>
+:root{
+  --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+  --txt:#e7e9ee; --muted:#9aa3b2; --accent:#c9a24b; --accent2:#e0b85c;
+  --green:#3fb96b; --red:#e06666; --blue:#5b9bd5;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Segoe UI",Arial,sans-serif;background:var(--bg);color:var(--txt);font-size:14px}
+header{background:linear-gradient(90deg,#15171d,#1d2128);padding:16px 24px;border-bottom:2px solid var(--accent);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+header h1{margin:0;font-size:20px;letter-spacing:.5px}
+header h1 span{color:var(--accent)}
+.subtitle{color:var(--muted);font-size:12px;margin-top:2px}
+nav{display:flex;gap:4px;background:var(--panel);padding:8px 12px;flex-wrap:wrap;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}
+nav button{background:transparent;color:var(--muted);border:none;padding:9px 16px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600}
+nav button:hover{background:var(--panel2);color:var(--txt)}
+nav button.active{background:var(--accent);color:#1a1a1a}
+main{padding:20px 24px;max-width:1300px;margin:0 auto}
+.tab{display:none}.tab.active{display:block}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:18px}
+.card h2{margin:0 0 4px;font-size:17px}
+.card .hint{color:var(--muted);font-size:12px;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;position:sticky;top:0;background:var(--panel)}
+tr:hover td{background:var(--panel2)}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+input,select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit}
+input:focus,select:focus{outline:none;border-color:var(--accent)}
+input.cost{width:100px;text-align:right}
+select.map{width:100%;max-width:340px}
+.pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+.pill.sub{background:rgba(91,155,213,.18);color:var(--blue)}
+.pill.ok{background:rgba(63,185,107,.16);color:var(--green)}
+.pill.warn{background:rgba(224,102,102,.16);color:var(--red)}
+.search{width:100%;max-width:360px;margin-bottom:12px;padding:9px 12px}
+.kpis{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 18px;flex:1;min-width:160px}
+.kpi .v{font-size:24px;font-weight:700;color:var(--accent2)}
+.kpi .l{color:var(--muted);font-size:12px;margin-top:2px}
+.controls{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-bottom:16px;background:var(--panel2);padding:12px 16px;border-radius:10px}
+.controls label{font-size:13px;color:var(--muted)}
+.controls input{width:80px;text-align:right}
+.dish{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:14px;overflow:hidden}
+.dish-head{padding:13px 18px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;gap:12px;flex-wrap:wrap}
+.dish-head:hover{background:var(--panel2)}
+.dish-head .name{font-size:15px;font-weight:700}
+.dish-head .sect{font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:.5px}
+.dish-body{display:none;border-top:1px solid var(--line);padding:6px 18px 16px}
+.dish.open .dish-body{display:block}
+.dish-metrics{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.metric{text-align:right}
+.metric .v{font-size:16px;font-weight:700}
+.metric .l{font-size:10px;color:var(--muted);text-transform:uppercase}
+.price{color:var(--green)!important}
+.foodcost-in{width:64px}
+.btn{background:var(--accent);color:#1a1a1a;border:none;padding:9px 16px;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px}
+.btn:hover{background:var(--accent2)}
+.btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+.btn.ghost:hover{color:var(--txt);border-color:var(--accent)}
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.foot{text-align:center;color:var(--muted);font-size:11px;padding:24px}
+.tag-unmapped{color:var(--red);font-size:11px}
+details summary{cursor:pointer;color:var(--accent);font-size:13px;margin:8px 0}
+.scroll{max-height:560px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Sistema de Costeo · <span>Piso Cuatro</span></h1>
+    <div class="subtitle">Costeo de platos, sub-recetas y precio de venta sugerido · Datos abril–mayo 2026</div>
+  </div>
+  <div class="toolbar" style="margin:0;align-items:center">
+    <span id="cloudStatus" style="font-size:12px;color:var(--muted)"></span>
+    <button class="btn" id="editBtn" onclick="toggleEdit()" style="display:none">🔒 Editar</button>
+    <button class="btn" onclick="exportData()">⬇ Respaldar datos</button>
+    <button class="btn ghost" onclick="importData()">⬆ Restaurar</button>
+    <button class="btn ghost" onclick="resetAll()">↺ Reiniciar</button>
+  </div>
+</header>
+<div id="lockBanner" style="display:none;background:#3a2f16;color:#e0b85c;text-align:center;padding:8px;font-size:13px;border-bottom:1px solid var(--accent)"></div>
+<nav id="nav"></nav>
+<main>
+  <div class="tab" id="tab-resumen"></div>
+  <div class="tab" id="tab-rentabilidad"></div>
+  <div class="tab" id="tab-platos"></div>
+  <div class="tab" id="tab-subrecetas"></div>
+  <div class="tab" id="tab-vinculacion"></div>
+  <div class="tab" id="tab-insumos"></div>
+  <div class="tab" id="tab-fijos"></div>
+</main>
+<div class="foot">Piso Cuatro · Sistema de costeo · En modo nube los cambios se guardan para todos; en modo local, solo en este navegador.</div>
+
+<script type="text/plain" id="pricesCSV">"PISO 4 — ÚLTIMOS PRECIOS REGISTRADOS POR PRODUCTO (ALIMENTOS)","","","","","","",""
+"Generado con base en 331 productos únicos | Datos abril–mayo 2026","","","","","","",""
+"","","","","","","",""
+"#","CATEGORÍA","PRODUCTO","ÚLTIMA FECHA","CANTIDAD","UNIDAD","VALOR UNITARIO ($)","VALOR TOTAL ($)"
+"1. Carnes/Proteínas","","","","","","",""
+"1","1. Carnes/Proteínas","Almeja En Concha Blanca","46147","1","Unidad","16684","16684"
+"2","1. Carnes/Proteínas","Anillos De Calamar Toradores 3","46147","1000","Gr","34.51","34510"
+"3","1. Carnes/Proteínas","Arroz Castellano X1Kg","46148","15","Unidad","10000","150000"
+"4","1. Carnes/Proteínas","Arroz Diana X1Kg","46148","15","Unidad","5400","81000"
+"5","1. Carnes/Proteínas","Barcino","46167","5125","Gr","28","143500"
+"6","1. Carnes/Proteínas","Bondiola De Cerdo","46154","10200","Gr","30.9","315180"
+"7","1. Carnes/Proteínas","Cabeza De Lomo","46123","10000","Gr","15.992","159920"
+"8","1. Carnes/Proteínas","Camaron Crudo Raw Pd 41-50G/30%","46148","14000","Gr","34.5","483000"
+"9","1. Carnes/Proteínas","Camaron Cultivo Vanmei 31-35","46154","15000","Gr","34.9","523500"
+"10","1. Carnes/Proteínas","Camaron U 15 X 1Und Cultivo","46147","10","Unidad","2200","22000"
+"11","1. Carnes/Proteínas","Carne Molida 80-20","46162","5000","Gr","28.9","144500"
+"12","1. Carnes/Proteínas","Contramuslo","46167","5785","Gr","10.7000864304235","61900"
+"13","1. Carnes/Proteínas","Cordon","46167","3395","Gr","24","81480"
+"14","1. Carnes/Proteínas","Costilla San Luis","46162","15650","Gr","30.9","483585"
+"15","1. Carnes/Proteínas","Entrepierna De Res","46167","4585","Gr","36","165060"
+"16","1. Carnes/Proteínas","Filete Basa","46154","10500","Gr","14.9","156450"
+"17","1. Carnes/Proteínas","Filete De Salmon 4-6","46113","10360","Gr","47","486920"
+"18","1. Carnes/Proteínas","Morrillo","46162","5000","Gr","29.9","149500"
+"19","1. Carnes/Proteínas","Palmitos X1Lb","46147","1","Unidad","9481","9481"
+"20","1. Carnes/Proteínas","Pechuga Refrigerada","46162","19950","Gr","16.9","337155"
+"21","1. Carnes/Proteínas","Pernil Campesino","46142","9750","Gr","1.15497435897436","11261"
+"22","1. Carnes/Proteínas","Pernil De Cerdo","46162","7000","Gr","25.9","181300"
+"23","1. Carnes/Proteínas","Punta De Anca","46164","5360","Gr","32","171520"
+"24","1. Carnes/Proteínas","Salmon Premium Filete 2-3","46162","4000","Gr","57.9","231600"
+"25","1. Carnes/Proteínas","Solomo","46154","10200","Gr","55.9","570180"
+"26","1. Carnes/Proteínas","Tocineta Economica Colanta X 1800G","46163","1","Unidad","85630","85630"
+"27","1. Carnes/Proteínas","Tocineta Plancha  C/P Mediana","46162","10500","Gr","31.9","334950"
+"2. Verduras","","","","","","",""
+"28","2. Verduras","Acelga X Un","46159","2","Unidad","1700","3400"
+"29","2. Verduras","Aguacate","46162","2400","Gr","10.5","25200"
+"30","2. Verduras","Ahuyama","46162","3000","Gr","2.13333333333333","6400"
+"31","2. Verduras","Alverja Desgranada","46114","2000","Gr","20.25","40500"
+"32","2. Verduras","Apio","46119","1","Gr","2700","2700"
+"33","2. Verduras","Arracacha","46119","5000","Gr","4.73","23650"
+"34","2. Verduras","Arveja","46162","3000","Gr","18","54000"
+"35","2. Verduras","Arveja Frozen Field","46119","1","Unidad","7150","7150"
+"36","2. Verduras","Banano","46154","1","Unidad","3700","3700"
+"37","2. Verduras","Cebolla Huevo","46162","3000","Gr","3.8","11400"
+"38","2. Verduras","Cebolla Larga","46119","1000","Gr","6.075","6075"
+"39","2. Verduras","Cebolla Morada","46162","3000","Gr","4.5","13500"
+"40","2. Verduras","Cebolla Puerro","46139","1000","Gr","5.7","5700"
+"41","2. Verduras","Cebollin","46154","2","Gr","3000","6000"
+"42","2. Verduras","Champiñon","46162","3000","Gr","24","72000"
+"43","2. Verduras","Champiñon 250Gr","46158","1","Unidad","8900","8900"
+"44","2. Verduras","Cilantro","46162","4","Gr","1500","6000"
+"45","2. Verduras","Cilantro Manojo","46152","6","Unidad","1300","7800"
+"46","2. Verduras","Ciruela","46154","2000","Gr","9","18000"
+"47","2. Verduras","Coles X Un","46131","1","Unidad","1600","1600"
+"48","2. Verduras","Coliflor","46162","3000","Gr","5.5","16500"
+"49","2. Verduras","Espinaca","46162","500","Gr","8","4000"
+"50","2. Verduras","Estragon","46154","1","Unidad","4500","4500"
+"51","2. Verduras","Fecula De Maiz","46162","3000","Gr","8","24000"
+"52","2. Verduras","Fresa","46162","300","Gr","12","3600"
+"53","2. Verduras","Guasca","46162","500","Gr","8","4000"
+"54","2. Verduras","Guayaba Agria","46119","3000","Gr","7.56","22680"
+"55","2. Verduras","Habichuela","46114","1000","Gr","3.375","3375"
+"56","2. Verduras","Hierba Buena","46154","1","Unidad","3000","3000"
+"57","2. Verduras","Hojas De Congo","46139","5","Unidad","3500","17500"
+"58","2. Verduras","Jengibre","46154","2000","Gr","16","32000"
+"59","2. Verduras","Kiwi","46163","80","Gr","23.475","1878"
+"60","2. Verduras","Lechuga Crespa X Un","46159","3","Unidad","1500","4500"
+"61","2. Verduras","Limon Mandarino","46154","50000","Gr","3.2","160000"
+"62","2. Verduras","Limon Tahiti","46166","2000","Gr","4.5","9000"
+"63","2. Verduras","Lulo","46139","1000","Gr","7.5","7500"
+"64","2. Verduras","Maiz Tierno","46154","2000","Gr","10","20000"
+"65","2. Verduras","Mandarina","46114","3000","Gr","4.725","14175"
+"66","2. Verduras","Mango","46162","4900","Gr","6.93877551020408","34000"
+"67","2. Verduras","Mango Tommy","46139","2300","Gr","6.07478260869565","13972"
+"68","2. Verduras","Mantequilla De Vaca Xlb","46154","6","Unidad","13000","78000"
+"69","2. Verduras","Manzana Roja","46162","5","Unidad","2200","11000"
+"70","2. Verduras","Manzana Verde","46119","4","Unidad","1890","7560"
+"71","2. Verduras","Maracuya","46154","1000","Gr","5.5","5500"
+"72","2. Verduras","Mazorca","46162","3","Bandeja","5000","15000"
+"73","2. Verduras","Mora","46162","2000","Gr","8.5","17000"
+"74","2. Verduras","Naranja","46154","2000","Gr","2.6","5200"
+"75","2. Verduras","Naranja Valencia","46114","2000","Gr","2.43","4860"
+"76","2. Verduras","Papa","46117","6000","Gr","3","18000"
+"77","2. Verduras","Papa Criolla","46162","10000","Gr","7","70000"
+"78","2. Verduras","Papa Parda","46162","5000","Gr","2.3","11500"
+"79","2. Verduras","Paquete Chia","46130","1","Unidad","1500","1500"
+"80","2. Verduras","Pepino","46159","2000","Gr","3","6000"
+"81","2. Verduras","Pepino Cohombro","46162","4000","Gr","2","8000"
+"82","2. Verduras","Pera","46154","8","Unidad","2200","17600"
+"83","2. Verduras","Perejil Liso X Un","46154","5","Unidad","2000","10000"
+"84","2. Verduras","Pimenton Rojo","46162","3000","Gr","5","15000"
+"85","2. Verduras","Piña Oro Miel","46162","3600","Gr","3.88888888888889","14000"
+"86","2. Verduras","Piña X Un","46131","1","Unidad","4000","4000"
+"87","2. Verduras","Platano","46120","1","Gr","60200","60200"
+"88","2. Verduras","Platano Verde","46154","7200","Gr","2.59722222222222","18700"
+"89","2. Verduras","Pulpa Guanabana 330 Gr","46154","4","Unidad","4500","18000"
+"90","2. Verduras","Rugula","46162","500","Gr","18","9000"
+"91","2. Verduras","Tamarindo","46162","3","Unidad","3000","9000"
+"92","2. Verduras","Tomate","46131","6000","Gr","6","36000"
+"93","2. Verduras","Tomate Cherry","46162","3000","Gr","12","36000"
+"94","2. Verduras","Tomate Cherry X 240G","46147","1","Unidad","4600","4600"
+"95","2. Verduras","Tomate Chonto","46162","5000","Gr","5","25000"
+"96","2. Verduras","Tomate De Arbol Pulpa 330Gr","46154","4","Unidad","4000","16000"
+"97","2. Verduras","Toronjil","46154","1","Unidad","4500","4500"
+"98","2. Verduras","Uchuva","46162","2000","Gr","12","24000"
+"99","2. Verduras","Yuca","46162","3000","Gr","3.8","11400"
+"100","2. Verduras","Zanahoria","46162","3000","Gr","2.5","7500"
+"101","2. Verduras","Zucchini","46115","2000","Gr","3.4","6800"
+"3. Otros productos de cocina","","","","","","",""
+"102","3. Otros productos de cocina","Aceite De Soya","46123","1","Unidad","43600","43600"
+"103","3. Otros productos de cocina","Aceite Fry Oleico X20Lt","46150","4","Unidad","260633","1042532"
+"104","3. Otros productos de cocina","Aceite Mestre Girasol X 5000 Cc","46142","1","Unidad","74970","74970"
+"105","3. Otros productos de cocina","Aceite Olica Otujo Abril Px 1Lt","46142","1","Unidad","26348","26348"
+"106","3. Otros productos de cocina","Aceite Sefrita Pet X3Lt","46150","3","Unidad","29843","89529"
+"107","3. Otros productos de cocina","Aceite Vegetal D1","46119","2","Unidad","19990","39980"
+"108","3. Otros productos de cocina","Aceituna Deshu Alfa Fras X1000G","46130","1","Unidad","29537","29537"
+"109","3. Otros productos de cocina","Ajonjoli Descortez Tostadodispronatx 500G","46155","1","Unidad","17205","17205"
+"110","3. Otros productos de cocina","Alcaparras En Vinagalfa Fras X470 G","46133","1","Unidad","17598","17598"
+"111","3. Otros productos de cocina","Almendra X500 Gr","46119","6","Unidad","23500","141000"
+"112","3. Otros productos de cocina","Amapola Semilla X500Gr","46141","1","Unidad","27000","27000"
+"113","3. Otros productos de cocina","Arandanos 125 G","46163","1","Unidad","7900","7900"
+"114","3. Otros productos de cocina","Arepa Normandy","46147","1","Unidad","6050","6050"
+"115","3. Otros productos de cocina","Arequipe Celema X1000G","46155","1","Unidad","24194","24194"
+"116","3. Otros productos de cocina","Aromatica Verde El Recinto","46158","1","Unidad","1450","1450"
+"117","3. Otros productos de cocina","Arroz Diana X10Kg","46130","2","Unidad","43024","86048"
+"118","3. Otros productos de cocina","Arroz Diana X500Gr","46127","11","Unidad","1800","19800"
+"119","3. Otros productos de cocina","Arroz Diana Xlb","46147","4","Unidad","2165","8660"
+"120","3. Otros productos de cocina","Atado De Panela","46156","1","Unidad","6450","6450"
+"121","3. Otros productos de cocina","Azucar Blanca Incauca Bolsa X1Kg","46155","5","Unidad","5013.8","25069"
+"122","3. Otros productos de cocina","Azucar Manuelita X1Kg","46161","6","Unidad","4200","25200"
+"123","3. Otros productos de cocina","Azucar Rio Paila Stickpack X1Kg","46126","1","Unidad","13300","13300"
+"124","3. Otros productos de cocina","Azucar Unidos X 1000","46144","1","Unidad","4950","4950"
+"125","3. Otros productos de cocina","Baguette 400Gr","46150","2","Unidad","14000","28000"
+"126","3. Otros productos de cocina","Bebida Nutri","46114","1","Unidad","14800","14800"
+"127","3. Otros productos de cocina","Bicarbonato De Soda Unidos","46144","1","Unidad","5600","5600"
+"128","3. Otros productos de cocina","Bolsa Reciclable","46167","1","Unidad","100","100"
+"129","3. Otros productos de cocina","Brioche Molde","46161","3","Unidad","12500","37500"
+"130","3. Otros productos de cocina","Brownie Arequipe","46119","15","Unidad","1990","29850"
+"131","3. Otros productos de cocina","Buñuelo","46162","50","Unidad","600","30000"
+"132","3. Otros productos de cocina","Carbon Vegetal Unidos","46134","3","Unidad","16450","49350"
+"133","3. Otros productos de cocina","Cerezas Coruña","46132","1","Unidad","8150","8150"
+"134","3. Otros productos de cocina","Chia X500 Gr","46141","1","Unidad","11000","11000"
+"135","3. Otros productos de cocina","Chocolate Corona Tradicional","46166","1","Unidad","15350","15350"
+"136","3. Otros productos de cocina","Chorizo Colanta Ternera","46130","1","Unidad","16150","16150"
+"137","3. Otros productos de cocina","Chorizo Santarosano Colanta X1125G","46123","3","Unidad","42950","128850"
+"138","3. Otros productos de cocina","Chorizo Santarosano Colanta X500G","46123","1","Unidad","19200","19200"
+"139","3. Otros productos de cocina","Chorizo Santarosano Duopack Colanta X10","46123","1","Unidad","4600","4600"
+"140","3. Otros productos de cocina","Cinco Especies Chinas X125 Gr","46114","1","Unidad","23000","23000"
+"141","3. Otros productos de cocina","Cobertura Blanca X500Gr Corona","46114","1","Unidad","22000","22000"
+"142","3. Otros productos de cocina","Cobertura Blanxa 1Kg Nacional De Chocolate","46119","1","Unidad","50000","50000"
+"143","3. Otros productos de cocina","Cobertura Chocolate Blanco Luker X2.5Kl","46142","1","Unidad","113692","113692"
+"144","3. Otros productos de cocina","Cobertura Negra X500 Gr","46150","2","Unidad","14000","28000"
+"145","3. Otros productos de cocina","Cobertura Sabor Chocolate Negro X1Kg","46155","1","Unidad","39771","39771"
+"146","3. Otros productos de cocina","Coco Cabello De Angel Cero Azucar X500Gr","46141","6","Unidad","20000","120000"
+"147","3. Otros productos de cocina","Coco Rallado Nro1 Iprodesa Xk Cd21","46155","1","Unidad","39867","39867"
+"148","3. Otros productos de cocina","Concha Para Taco","46147","1","Unidad","23250","23250"
+"149","3. Otros productos de cocina","Condimento Granja","46117","1","Unidad","3550","3550"
+"150","3. Otros productos de cocina","Crema Agria Colanta 400G","46149","1","Unidad","11001","11001"
+"151","3. Otros productos de cocina","Crema Agria Colanta A Granel X4Kg","46155","1","Unidad","85350","85350"
+"152","3. Otros productos de cocina","Crema Agria D1","46138","1","Unidad","8490","8490"
+"153","3. Otros productos de cocina","Crema Chantilly Clack X 1000Gr","46161","1","Unidad","64000","64000"
+"154","3. Otros productos de cocina","Crema De Leche Celema X900 G","46151","1","Unidad","18900","18900"
+"155","3. Otros productos de cocina","Crema De Leche Parmalat Uht Bolsa X 1100 Lt","46142","3","Unidad","19500","58500"
+"156","3. Otros productos de cocina","Crema De Leche Pasteurizar Colanta X9700G","46149","1","Unidad","178430","178430"
+"157","3. Otros productos de cocina","Crema De Leche Uht","46141","1","Unidad","19450","19450"
+"158","3. Otros productos de cocina","Crema De Leche Uht Semiente Col Bolsa 870 G","46163","10","Unidad","16200","162000"
+"159","3. Otros productos de cocina","Crema De Mani","46131","1","Unidad","5990","5990"
+"160","3. Otros productos de cocina","Croqueta De Papa Smiles 1,5 Kg","46139","2","Unidad","36488.97","72977.94"
+"161","3. Otros productos de cocina","Cubeta De Huevos","46156","6","Unidad","16000","96000"
+"162","3. Otros productos de cocina","Cuña Queso Azul","46142","205","Gr","136.90243902439","28065"
+"163","3. Otros productos de cocina","Dedos De Queso","46162","30","Unidad","2300","69000"
+"164","3. Otros productos de cocina","Domicilio","46166","1","Unidad","11000","11000"
+"165","3. Otros productos de cocina","Durazno En Almibar D1","46129","1","Unidad","10800","10800"
+"166","3. Otros productos de cocina","Espagueti La Muñeca Bolsax1000G","46155","2","Unidad","6198","12396"
+"167","3. Otros productos de cocina","Flor De Jamaica X500 Gr","46119","1","Unidad","45000","45000"
+"168","3. Otros productos de cocina","Frijol Caraota Aburra X1Kg","46150","1","Unidad","9727","9727"
+"169","3. Otros productos de cocina","Frijol Refrito Azteca","46142","1","Unidad","10600","10600"
+"170","3. Otros productos de cocina","Frijol Unidos","46147","1","Unidad","8550","8550"
+"171","3. Otros productos de cocina","Galleta Concha Caserita X40 Und","46158","1","Unidad","10200","10200"
+"172","3. Otros productos de cocina","Galleta Ducales","46163","1","Unidad","7950","7950"
+"173","3. Otros productos de cocina","Galleta Mini","46136","1","Unidad","10450","10450"
+"174","3. Otros productos de cocina","Galleta Noel Sultana","46137","1","Unidad","7850","7850"
+"175","3. Otros productos de cocina","Galleta Oreo","46136","1","Unidad","6800","6800"
+"176","3. Otros productos de cocina","Garbanzo Aburra X1Kg","46142","1","Unidad","9342","9342"
+"177","3. Otros productos de cocina","Gaseosa Premio Roja","46164","1","Unidad","8050","8050"
+"178","3. Otros productos de cocina","Ginger Canada Dry 1500 Ml","46166","1","Unidad","5800","5800"
+"179","3. Otros productos de cocina","Granola Familiar Cocodispronat Bolsa X1Kg","46142","2","Unidad","22575.5","45151"
+"180","3. Otros productos de cocina","Granola Frutos Rojos","46135","1","Unidad","4990","4990"
+"181","3. Otros productos de cocina","Harina De Trigo Haz De Oroz Bolsa X 500G","46155","5","Unidad","2189.2","10946"
+"182","3. Otros productos de cocina","Helado Crem Helado 5 Lts","46166","1","Unidad","42500","42500"
+"183","3. Otros productos de cocina","Helado Vainilla X10Lt","46162","1","Unidad","84900","84900"
+"184","3. Otros productos de cocina","Hielo","46165","1","Unidad","6250","6250"
+"185","3. Otros productos de cocina","Huevo Amarrado Rojo","46151","1","Unidad","13400","13400"
+"186","3. Otros productos de cocina","Jamon De Cerdo","46128","2","Unidad","8700","17400"
+"187","3. Otros productos de cocina","Jarabe Con Miel Zafrmasr X5.2Kg","46142","1","Unidad","109361","109361"
+"188","3. Otros productos de cocina","Jugo De Naranja","46150","8","Unidad","6600","52800"
+"189","3. Otros productos de cocina","Kewpie Mayonnaise X 450 Gr","46147","1","Unidad","33320","33320"
+"190","3. Otros productos de cocina","Leche Colanta Entera","46163","6","Unidad","4250","25500"
+"191","3. Otros productos de cocina","Leche En Polvo D1","46149","1","Unidad","20900","20900"
+"192","3. Otros productos de cocina","Leche Entera Celema Bolsa X1000Ml","46161","6","Unidad","5466.66666666667","32800"
+"193","3. Otros productos de cocina","Leche Entera D1","46137","8","Unidad","2990","23920"
+"194","3. Otros productos de cocina","Leche San Clemente","46139","1","Unidad","19200","19200"
+"195","3. Otros productos de cocina","Leche Unidos Entera X6","46166","12","Unidad","3458.33333333333","41500"
+"196","3. Otros productos de cocina","Lechuga Hidroponica","46152","1","Unidad","3680","3680"
+"197","3. Otros productos de cocina","Lenteja Aburra X1Kg","46147","2","Unidad","10425","20850"
+"198","3. Otros productos de cocina","Lenteja D1","46146","2","Unidad","2490","4980"
+"199","3. Otros productos de cocina","Maizena X720 G","46142","1","Unidad","20099","20099"
+"200","3. Otros productos de cocina","Mantequilla Colanta X500G","46163","10","Unidad","26039.6","260396"
+"201","3. Otros productos de cocina","Mantequilla De Mani Creamy Kari X340G","46133","1","Unidad","8981","8981"
+"202","3. Otros productos de cocina","Masa De Pandebono","46162","2000","Gr","35","70000"
+"203","3. Otros productos de cocina","Masmelos Millows","46139","1","Unidad","6150","6150"
+"204","3. Otros productos de cocina","Mayonesa Esp Zafran X3600G","46127","1","Unidad","87686","87686"
+"205","3. Otros productos de cocina","Mccain Crispers 5X2,5Kg","46156","2","Unidad","38052","76104"
+"206","3. Otros productos de cocina","Mccain Crispers 5X3,5 Kg","46139","2","Unidad","38051.44","76102.88"
+"207","3. Otros productos de cocina","Milo Activ - Go","46152","1","Unidad","66000","66000"
+"208","3. Otros productos de cocina","Mostaza Zafran Gar X 4200G","46150","1","Unidad","67114","67114"
+"209","3. Otros productos de cocina","Nescafe Tradicional Lata X500 G","46142","1","Unidad","85512","85512"
+"210","3. Otros productos de cocina","Oregano En Escamas X500 Gr","46126","1","Unidad","15000","15000"
+"211","3. Otros productos de cocina","Paketon Luker X750 G","46133","2","Unidad","48300","96600"
+"212","3. Otros productos de cocina","Pan Hamburguesa 11Cm","46166","52","Unidad","2000","104000"
+"213","3. Otros productos de cocina","Pan Tajado D1","46128","2","Unidad","2990","5980"
+"214","3. Otros productos de cocina","Panela 4 Und","46152","1","Unidad","6700","6700"
+"215","3. Otros productos de cocina","Panela Reg San Valentin Empacada X Par","46155","1","Unidad","7200","7200"
+"216","3. Otros productos de cocina","Panko X500 Gr","46141","10","Unidad","10000","100000"
+"217","3. Otros productos de cocina","Paprika San Valentin X500 G","46142","1","Unidad","18599","18599"
+"218","3. Otros productos de cocina","Pasta Conzazoni Penne Rigate X500","46147","6","Unidad","8780.16666666667","52681"
+"219","3. Otros productos de cocina","Pasta Doria Ricatone","46130","1","Unidad","2300","2300"
+"220","3. Otros productos de cocina","Pasta Doria Tallarin","46164","1","Unidad","2300","2300"
+"221","3. Otros productos de cocina","Pasta Para Lasagna La Muñeca Cajax400G","46147","4","Unidad","8923.75","35695"
+"222","3. Otros productos de cocina","Pasta Tallarin La Muñeca Clasico X250G","46142","2","Unidad","2024.5","4049"
+"223","3. Otros productos de cocina","Pepinillo Agridulce","46142","1","Unidad","7980","7980"
+"224","3. Otros productos de cocina","Pepinillo En Vinagre","46142","1","Unidad","8730","8730"
+"225","3. Otros productos de cocina","Pimienta Negra En Grano X500 Gr","46126","2","Unidad","26000","52000"
+"226","3. Otros productos de cocina","Polvo Para Hornear Levapan","46127","2","Unidad","5000","10000"
+"227","3. Otros productos de cocina","Pulpas","46161","1","Unidad","5650","5650"
+"228","3. Otros productos de cocina","Quesillo Bloque","46138","1","Unidad","50000","50000"
+"229","3. Otros productos de cocina","Quesillo Tajado D1","46138","4","Unidad","10500","42000"
+"230","3. Otros productos de cocina","Queso Blanco Colanta X2Kg","46149","1","Unidad","56840","56840"
+"231","3. Otros productos de cocina","Queso Campesino Colanta X250G","46163","2","Unidad","8750","17500"
+"232","3. Otros productos de cocina","Queso Colanta Crema","46147","1","Unidad","9605","9605"
+"233","3. Otros productos de cocina","Queso Costeño","46149","6","Unidad","11700","70200"
+"234","3. Otros productos de cocina","Queso Costeño Colanta Bloque X500G","46123","2","Unidad","20150","40300"
+"235","3. Otros productos de cocina","Queso Costeño Colanta Rallado X500 Gr","46155","6","Unidad","15720","94320"
+"236","3. Otros productos de cocina","Queso Crema Colanta X400 Gr","46149","5","Unidad","9210","46050"
+"237","3. Otros productos de cocina","Queso Mozzarella Colanta Bloque 2.5 Kg","46163","1","Unidad","87120","87120"
+"238","3. Otros productos de cocina","Queso Muenster","46151","2","Unidad","89490","178980"
+"239","3. Otros productos de cocina","Queso Para Asar Colanta X500G","46163","1","Unidad","22050","22050"
+"240","3. Otros productos de cocina","Queso Parmesano","46132","1","Unidad","17350","17350"
+"241","3. Otros productos de cocina","Queso Parmesano Rallado Colanta X1Kg","46149","4","Unidad","90249.5","360998"
+"242","3. Otros productos de cocina","Queso Parmesano Rallado Colanta X500Gr","46163","6","Unidad","45580.5","273483"
+"243","3. Otros productos de cocina","Quinua Aburra X1Kg","46155","1","Unidad","23392","23392"
+"244","3. Otros productos de cocina","Sal De Ajo San Valentin X500G","46142","1","Unidad","11246","11246"
+"245","3. Otros productos de cocina","Sal Marina X1000Gr","46152","1","Unidad","4390","4390"
+"246","3. Otros productos de cocina","Sal Refisal Bolsa X 1000G","46155","3","Unidad","2563","7689"
+"247","3. Otros productos de cocina","Sal Refisal Bolsa X3000G","46130","1","Unidad","7334","7334"
+"248","3. Otros productos de cocina","Salsa Bbq Ahumada Fruco Galon X4250","46155","1","Unidad","58191","58191"
+"249","3. Otros productos de cocina","Salsa Bbq Zafran Gx4300G","46127","2","Unidad","77164","154328"
+"250","3. Otros productos de cocina","Salsa De Chocolate Aderezos X Kilo","46132","2","Unidad","14000","28000"
+"251","3. Otros productos de cocina","Salsa De Chocolate Zafran Xkg","46155","2","Unidad","22660","45320"
+"252","3. Otros productos de cocina","Salsa De Tomate Fruco Gx4350G","46127","1","Unidad","73460","73460"
+"253","3. Otros productos de cocina","Salsa En Polvo Tajin Petx400G","46150","2","Unidad","31529","63058"
+"254","3. Otros productos de cocina","Salsa Mostaza Differ X4000","46119","1","Unidad","16800","16800"
+"255","3. Otros productos de cocina","Salsa Napolitana D1","46163","1","Unidad","6600","6600"
+"256","3. Otros productos de cocina","Salsa Soya Aderezos X1050G","46150","5","Unidad","13934.8","69674"
+"257","3. Otros productos de cocina","Salsa Soya Aderezos X3200","46142","2","Unidad","38190.5","76381"
+"258","3. Otros productos de cocina","Salsa Soya Coruña","46142","1","Unidad","12800","12800"
+"259","3. Otros productos de cocina","Salsa Tomate Differ X4000","46119","1","Unidad","16500","16500"
+"260","3. Otros productos de cocina","Sobre Frutiño","46118","2","Unidad","1000","2000"
+"261","3. Otros productos de cocina","Sobre La Sopera","46115","1","Unidad","4000","4000"
+"262","3. Otros productos de cocina","Splenda X700U X1G","46147","1","Unidad","40831","40831"
+"263","3. Otros productos de cocina","Sugg Syrup Lyche Vidrio X750 Ml","46147","1","Unidad","45073","45073"
+"264","3. Otros productos de cocina","Sugg Syrup Sandia X750Ml","46147","1","Unidad","45072","45072"
+"265","3. Otros productos de cocina","Sultana Taco X210G","46155","5","Unidad","7019.8","35099"
+"266","3. Otros productos de cocina","Super Oil X 20Lt","46129","4","Unidad","140000","560000"
+"267","3. Otros productos de cocina","Syrup Quicksy","46135","4","Unidad","6490","25960"
+"268","3. Otros productos de cocina","Tinta De Calamar - Squidink X500 Gr","46147","1","Unidad","173084","173084"
+"269","3. Otros productos de cocina","Tocineta Ahumada D1","46157","14","Unidad","6600","92400"
+"270","3. Otros productos de cocina","Tocineta Colanta X900G","46155","1","Unidad","45711","45711"
+"271","3. Otros productos de cocina","Tocineta Sandwich D1","46135","2","Unidad","6600","13200"
+"272","3. Otros productos de cocina","Tocineta X250 G","46131","1","Unidad","6900","6900"
+"273","3. Otros productos de cocina","Tomate Pelado Conserva Pelati X2.5 Kg","46142","1","Unidad","30658","30658"
+"274","3. Otros productos de cocina","Tomates Secos","46134","4","Unidad","9250","37000"
+"275","3. Otros productos de cocina","Tortilla De Maiz Amarilla Entera X160","46149","1","Unidad","36700","36700"
+"276","3. Otros productos de cocina","Tortilla Fajita 12Ux360G Institucional","46142","1","Unidad","7762","7762"
+"277","3. Otros productos de cocina","Tortilla Maiz Bimbo","46151","10","Unidad","7100","71000"
+"278","3. Otros productos de cocina","Tostada D1","46164","3","Unidad","2300","6900"
+"279","3. Otros productos de cocina","Turron Supercoco","46163","1","Unidad","23350","23350"
+"280","3. Otros productos de cocina","Vinagre Balsamico 24 Meses X1Lt","46150","2","Unidad","15917.5","31835"
+"281","3. Otros productos de cocina","Vinagre Blanco Ensupunto  X3000 Ml","46155","3","Unidad","6247.66666666667","18743"
+"282","3. Otros productos de cocina","Vinagre Unidos","46160","1","Unidad","5350","5350"
+"283","3. Otros productos de cocina","Vino Cabernet D1","46151","2","Unidad","18500","37000"
+"284","3. Otros productos de cocina","Yogurt Griego","46158","5","Unidad","10360","51800"
+"4. Bebidas","","","","","","",""
+"285","4. Bebidas","Agua Hatsu 300 Ml","46164","24","Unidad","3400","81600"
+"286","4. Bebidas","Agua Sin Gas","46136","7","Unidad","550","3850"
+"287","4. Bebidas","Amaretto Ambrosia X750Ml","46158","1","Unidad","53500","53500"
+"288","4. Bebidas","Aperitivo Aperol 750 Ml","46156","1","Unidad","84951","84951"
+"289","4. Bebidas","Bretaña","46161","48","Unidad","2287.5","109800"
+"290","4. Bebidas","Bretaña 1500 Pet","46147","6","Unidad","3750","22500"
+"291","4. Bebidas","Bretaña 300 Ml Vidrio","46157","48","Unidad","2287.5","109800"
+"292","4. Bebidas","Buchanans Deluxe Aged 12 Years 0.750 L","46136","2","Unidad","145588","291176"
+"293","4. Bebidas","Cerveza Heineken Nal Bot 330","46157","12","Unidad","3416.66666666667","41000"
+"294","4. Bebidas","Cerveza Nergra Bot","46161","12","Unidad","3621.3725","43456.47"
+"295","4. Bebidas","Cerveza Rose Bot","46161","12","Unidad","3462.50166666667","41550.02"
+"296","4. Bebidas","Club Colombia Dorada 330 Ml","46161","30","Unidad","2926.66666666667","87800"
+"297","4. Bebidas","Coca Cola 400 Ml","46161","60","Unidad","2216.66666666667","133000"
+"298","4. Bebidas","Coca Cola Zero 400 Ml","46141","120","Unidad","2116.66666666667","254000"
+"299","4. Bebidas","Corona 330 Ml","46161","24","Unidad","3741.66666666667","89800"
+"300","4. Bebidas","Cuarteron De Cafe Ocampos","46122","1","Unidad","145000","145000"
+"301","4. Bebidas","Espumante Champaña D1","46155","1","Unidad","26950","26950"
+"302","4. Bebidas","Gaseosa Schweepes 1.5","46156","2","Unidad","4750","9500"
+"303","4. Bebidas","Ginebra Bombay Sapphire 40 700Ml","46141","3","Unidad","129200","387600"
+"304","4. Bebidas","Gordons Dry Gin 1,5L","46165","1","Unidad","124363","124363"
+"305","4. Bebidas","Juniper Coconut","46156","48","Unidad","5883","282384"
+"306","4. Bebidas","Juniper Rose Cider","46156","40","Unidad","5883","235320"
+"307","4. Bebidas","Juniper Toronja","46156","24","Unidad","5987","143688"
+"308","4. Bebidas","Jw Black Label 0.7 L","46165","1","Unidad","132427","132427"
+"309","4. Bebidas","Mezcal Ojo De Tigre","46139","1","Unidad","165000","165000"
+"310","4. Bebidas","No Especifica","46162","1","Unidad","19500","19500"
+"311","4. Bebidas","Old Parr Aged 12 Years 0,75L","46136","2","Unidad","128247.5","256495"
+"312","4. Bebidas","Ron Carta De Oro  X750","46162","1","Unidad","102163","102163"
+"313","4. Bebidas","Ron Carta De Oro X375","46150","5","Unidad","53129","265645"
+"314","4. Bebidas","Ron Juan De La Cruz  X750 Cc","46162","1","Unidad","61966","61966"
+"315","4. Bebidas","Ron Juan De La Cruz 375Ml","46162","2","Unidad","32528","65056"
+"316","4. Bebidas","Ron Roble Blanco X750Cc","46162","3","Unidad","46951","140853"
+"317","4. Bebidas","Serv Fab Base Lactea Coco 145 Gr","46162","30","Unidad","3651","109530"
+"318","4. Bebidas","Serv Fab Base Mango Biche 100 Gr X 10 Und","46162","60","Unidad","2343.5","140610"
+"319","4. Bebidas","Soda Hatsu Limon Hierbabuena 300 Ml","46139","6","Unidad","2458.33833333333","14750.03"
+"320","4. Bebidas","Soda Izots  1,5","46162","2","Unidad","2200","4400"
+"321","4. Bebidas","Tanqueray London Dry Gin 0,70L","46144","1","Unidad","133652","133652"
+"322","4. Bebidas","Tequila Jose Cuervo Esp Silver750 38%Vol","46151","2","Unidad","83204.5","166409"
+"323","4. Bebidas","Tequila Jose Cuervo Especial Reposado 750","46142","3","Unidad","83215.3333333333","249646"
+"324","4. Bebidas","Vino Don Simon Bco Prem Chard Tetra 1000","46165","3","Unidad","23692.6666666667","71078"
+"325","4. Bebidas","Vino Don Simon Tinto Merlot Tetra 1000 Ml","46165","6","Unidad","23694","142164"
+"326","4. Bebidas","Vino Gomez Cruz Blanc","46139","12","Unidad","40000","480000"
+"327","4. Bebidas","Vino Gomez Cruz Rose","46139","24","Unidad","40000","960000"
+"328","4. Bebidas","Vino Las Moras Malbec 187Ml","46119","3","Unidad","15330.3333333333","45991"
+"329","4. Bebidas","Vino Sta Carolina Rvado Cab Sauv 185.5Ml","46144","2","Unidad","13165.5","26331"
+"330","4. Bebidas","Vodka Skyy 40% X 750Ml","46156","1","Unidad","64250","64250"
+"331","4. Bebidas","Whisky Jack Danuels 40% 700Cl","46156","2","Unidad","110799","221598"
+"","","","","","","",""
+"Total: 331 productos únicos registrados","","","","","","",""
+</script>
+
+<script>
+/* ============ DATOS EMBEBIDOS ============ */
+
+// Sub-recetas: nombre, rendimiento (porciones), items [ingrediente, cantidad, unidad]
+const SUBRECETAS = [
+ ["CREMA DE AGUACATE",30,[["aguacate",200,"g"],["sal",2,"g"],["limon",30,"ml"],["pimienta",1,"g"],["aceite vegetal",80,"g"],["cilantro",2,"g"]]],
+ ["AREPAS DE ARROZ",50,[["arroz",1000,"g"],["queso costeño",400,"g"],["mantequilla",120,"g"],["aceite vegetal",80,"g"]]],
+ ["AJI CASERO",30,[["cebolla larga",200,"g"],["tomate chonto",400,"g"],["limon",100,"g"],["vinagre",50,"g"],["cilantro",5,"g"],["salsa de tomate",200,"g"],["aji pajarito",100,"g"],["sal",5,"g"],["pimienta",2,"g"],["azucar",80,"g"]]],
+ ["PICO DE GALLO",30,[["cebolla blanca",200,"g"],["tomate chonto",400,"g"],["limon",100,"g"],["vinagre",50,"g"],["cilantro",5,"g"],["sal",5,"g"],["pimienta",2,"g"]]],
+ ["TERIYAKI",50,[["limonaria",50,"g"],["albahaca",50,"g"],["ajo",50,"g"],["jengibre",30,"g"],["azucar",1000,"g"],["agua",100,"g"],["soya",200,"g"],["guayaba",250,"g"],["fecula de maiz",70,"g"]]],
+ ["LECHE DE TIGRE DE PIÑA",15,[["piña",500,"g"],["hierbabuena",50,"g"],["zumo de limon",150,"g"],["sal",5,"g"],["pimienta",2,"g"],["azucar",80,"g"]]],
+ ["CHIMICHURRI",30,[["perejil",150,"g"],["cilantro",100,"g"],["cebolla morada",200,"g"],["aceite vegetal",150,"g"],["vinagre blanco",100,"g"],["oregano seco",15,"g"],["sal",2,"g"],["pimienta",1,"g"],["pimenton rojo",200,"g"]]],
+ ["PANCETA MARINADA",80,[["panceta de cerdo",15000,"g"],["semilla de hinojo",100,"g"],["pimienta",10,"g"],["panela",250,"g"],["romero",60,"g"],["aceite vegetal",200,"g"],["sal",100,"g"]]],
+ ["SALSA DE QUESO AZUL",30,[["queso azul",200,"g"],["sal",10,"g"],["vino blanco",200,"g"],["cebolla blanca",200,"g"],["agua",1000,"ml"],["sazon completa",30,"g"],["fecula de maiz",100,"g"],["albahaca",5,"g"]]],
+ ["SALSA DE AJILLO",10,[["ajo",100,"g"],["vino blanco",150,"g"],["perejil",10,"g"],["mantequilla",200,"g"],["crema de leche",200,"g"],["sal",5,"g"],["pimienta",2,"g"],["zumo de limon",50,"g"]]],
+ ["POMODORO",30,[["tomate chonto",1000,"g"],["albahaca",50,"g"],["cebolla blanca",200,"g"],["oregano seco",5,"g"],["aceite oliva",100,"g"],["sal",5,"g"],["pimienta",2,"g"],["tomillo",5,"g"]]],
+ ["SALSA DE CHAMPIÑON",20,[["champiñon",1000,"g"],["cebolla blanca",300,"g"],["ajo",50,"g"],["sal",5,"g"],["pimienta",3,"g"],["crema de leche",500,"g"],["vino blanco",200,"g"],["tomillo",5,"g"]]],
+ ["COSTILLA DE CERDO MARINADO",50,[["costilla de cerdo",20000,"g"],["sal",100,"g"],["pimienta",60,"g"],["cerveza negra",2,"ud"],["cilantro",200,"g"],["agua",500,"g"],["pimenton rojo",500,"g"],["pimienta",40,"g"]]],
+ ["ARROZ CON COCO",15,[["arroz castellano",1000,"g"],["ajo",50,"g"],["cebolla larga",200,"g"],["aceite vegetal",100,"g"],["coco rallado",100,"g"],["supercoco",300,"g"],["panela",150,"g"],["mantequilla",100,"g"]]],
+ ["SALSA GOLDEN",40,[["pimenton rojo",1000,"g"],["uchuva",1000,"g"],["vinagre",1000,"g"],["azucar",1000,"g"],["ajo",50,"g"]]],
+ ["SALSA DEMIGLACE",50,[["cebolla morada",300,"g"],["hueso de res",1000,"g"],["ajo",50,"g"],["vino tinto",1000,"g"],["costilla",100,"g"],["fondo",1000,"g"],["laurel",5,"g"],["tomillo",5,"g"],["pimienta",5,"g"]]],
+ ["MAYO LIMON",30,[["mayonesa",1000,"g"],["zumo de limon",200,"g"],["ajo",50,"g"],["ajonjoli",50,"g"],["sal",5,"g"],["pimienta",2,"g"]]],
+ ["ADEREZO DE MANI",20,[["mantequilla de mani",200,"g"],["aceite de oliva",100,"g"],["miel",100,"g"],["zumo de limon",50,"g"],["sal",5,"g"],["pimienta",2,"g"]]],
+ ["POLLO ENSALADA",8,[["pollo",1000,"g"],["huevo",2,"ud"],["fecula de maiz",200,"g"],["harina de trigo",100,"g"],["sal",5,"g"],["pimienta",2,"g"],["oregano seco",2,"g"],["paprika",5,"g"]]],
+ ["VINAGRETA PONZU",40,[["soya",100,"g"],["vinagre",500,"g"],["azucar",500,"g"],["zumo de limon",200,"g"]]],
+ ["CARNE DE HAMBURGUESA",5,[["carne molida",700,"g"],["chorizo",300,"g"],["sal",10,"g"],["pimienta",5,"g"],["tomillo",5,"g"]]],
+ ["VINAGRETA NIKKEI",30,[["soya",250,"g"],["aceite de sesamo",300,"g"],["zumo de naranja",300,"g"],["zumo de limon",60,"g"],["pimienta",5,"g"],["miel",200,"g"]]],
+ ["DIP DE TOMATE",10,[["yogurt griego",200,"g"],["tomates secos",300,"g"]]],
+ ["PEPINILLOS EN QUESO",10,[["queso crema",200,"g"],["pepinillo",300,"g"]]],
+ ["MERMELADA DE CHORIZO",20,[["chorizo",700,"g"],["panela",200,"g"],["agua",100,"g"],["whisky",100,"g"]]],
+ ["BBQ DE PIÑA",90,[["piña",500,"g"],["salsa bbq",3000,"g"],["coca cola",300,"ml"],["cilantro",100,"g"],["cebolla morada",200,"g"],["ajo",50,"g"],["salsa soya",150,"ml"]]],
+ ["NUGGETS DE POLLO",20,[["pollo",1000,"g"],["salsa soya",100,"g"],["tomillo",3,"g"],["harina de trigo",500,"g"],["huevo",5,"ud"],["panko",1000,"g"]]]
+];
+
+// Platos: nombre, seccion, porciones, items [ingrediente, cantidad, unidad]
+const PLATOS = [
+ ["DESAYUNO CAMPESINO","Brunch",1,[["mantequilla",20,"g"],["huevo",2,"ud"],["chorizo",100,"g"],["arepa",1,"ud"],["queso campesino",120,"g"],["limon",70,"g"],["crema de aguacate",30,"g"],["ajo en polvo",1,"g"],["sal",1,"g"],["pimienta",1,"g"]]],
+ ["OMELETTE RANCHERO","Brunch",1,[["mantequilla",20,"g"],["huevo",2,"ud"],["chorizo",100,"g"],["arepa",1,"ud"],["queso muenster",25,"g"],["maiz tierno",30,"g"],["crema de aguacate",30,"g"],["ajo en polvo",1,"g"],["sal",1,"g"],["pimienta",1,"g"],["tomate cherry",60,"g"]]],
+ ["HUEVOS ROTOS","Brunch",1,[["mantequilla",20,"g"],["huevo",2,"ud"],["mccain crispers",200,"g"],["pomodoro",100,"g"],["tocineta",50,"g"],["condimento granja",2,"g"],["paprika",1,"g"],["ajo en polvo",1,"g"],["sal",1,"g"],["pimienta",1,"g"]]],
+ ["MIGOTE","Brunch",1,[["chocolate corona",60,"g"],["leche",200,"ml"],["crema de leche",50,"ml"],["masa de waffle",140,"g"],["dedos de queso",1,"ud"],["galleta ducales",4,"ud"]]],
+ ["WAFFLE DE PANDEBONO","Brunch",1,[["masa de waffle",140,"g"],["fresa",30,"g"],["kiwi",30,"g"],["arandanos",30,"g"],["jarabe con miel",50,"g"],["huevo",2,"ud"],["mantequilla",20,"g"],["ajo en polvo",1,"g"],["sal",1,"g"],["pimienta",1,"g"]]],
+ ["PA' PICAR","Para Compartir",1,[["solomo",100,"g"],["pollo",120,"g"],["panceta de cerdo",120,"g"],["chorizo",100,"g"],["arepas de arroz",100,"g"],["tomate",50,"g"],["chimichurri",50,"g"],["limon",50,"g"],["pepino",15,"g"],["papa criolla",200,"g"],["rugula",5,"g"],["acelga",5,"g"]]],
+ ["EMPANADAS DE CARNE","Para Compartir",1,[["empanadas",7,"ud"],["aji casero",80,"g"]]],
+ ["TACOS","Entradas",1,[["tortilla maiz",2,"ud"],["costilla san luis",100,"g"],["frijol refrito",70,"g"],["crema agria",70,"g"],["crema de aguacate",70,"g"],["queso mozzarella",30,"g"],["pico de gallo",50,"g"],["cebolla huevo",10,"g"],["pepino",15,"g"]]],
+ ["CAMARON TROPICAL","Entradas",1,[["leche de tigre de piña",150,"ml"],["camaron",150,"g"],["aguacate",50,"g"],["maiz tierno",30,"g"],["teriyaki",30,"g"],["cilantro",2,"g"],["yuca",10,"g"],["mango",50,"g"]]],
+ ["BROCHETAS","Entradas",1,[["solomo",200,"g"],["palos pincho",2,"ud"],["teriyaki",50,"g"],["ajonjoli",1,"g"],["mccain crispers",200,"g"],["tomate cherry",50,"g"],["mostaza",5,"g"],["mayo limon",5,"g"],["pepino",15,"g"],["sal",2,"g"],["pimienta",1,"g"],["oregano seco",1,"g"],["paprika",2,"g"]]],
+ ["ACEVICHADO DE LA MONTAÑA","Entradas",1,[["panceta de cerdo",180,"g"],["tomate chonto",50,"g"],["tomate cherry",50,"g"],["acelga",5,"g"],["rugula",5,"g"],["maiz tierno",30,"g"],["aguacate",60,"g"],["salsa en polvo tajin",1,"g"],["cebolla huevo",50,"g"]]],
+ ["PUNTA DE ANCA","Platos Fuertes",1,[["punta de anca",400,"g"],["acelga",5,"g"],["rugula",5,"g"],["tomate cherry",50,"g"],["aguacate",50,"g"],["salsa en polvo tajin",1,"g"],["pepino",15,"g"],["salsa de queso azul",60,"g"],["piña",50,"g"],["papa criolla",200,"g"]]],
+ ["ARROZ NEGRO","Platos Fuertes",1,[["arroz castellano",200,"g"],["tinta de calamar",15,"g"],["camaron",150,"g"],["anillos de calamar",80,"g"],["almeja",50,"g"],["camaron",50,"g"],["fondo",100,"g"],["mantequilla",60,"g"],["vino blanco",50,"g"],["pimenton rojo",20,"g"],["salsa de ajillo",100,"g"],["sal",2,"g"],["pimienta",1,"g"]]],
+ ["TRUCHA","Platos Fuertes",1,[["trucha",400,"g"],["camaron",150,"g"],["sal",2,"g"],["pimienta",1,"g"],["aceite vegetal",50,"g"],["salsa de ajillo",120,"g"],["mccain crispers",200,"g"],["rugula",5,"g"],["pepino",15,"g"],["acelga",5,"g"]]],
+ ["TALLARIN MARINERO","Platos Fuertes",1,[["pasta doria tallarin",400,"g"],["camaron",150,"g"],["anillos de calamar",80,"g"],["almeja",50,"g"],["fondo",100,"g"],["mantequilla",60,"g"],["vino blanco",50,"g"],["pomodoro",5,"g"],["sal",15,"g"],["pimienta",5,"g"],["queso parmesano",50,"g"],["albahaca",1,"g"]]],
+ ["CHURRASCO DE POLLO","Platos Fuertes",1,[["contramuslo",450,"g"],["sal",2,"g"],["paprika",2,"g"],["oregano seco",1,"g"],["pimienta",1,"g"],["aceite olica",50,"g"],["papa criolla",200,"g"],["salsa de champiñon",150,"g"],["rugula",5,"g"],["acelga",5,"g"],["pepino",15,"g"],["tomate cherry",50,"g"]]],
+ ["COSTILLA TERIYAKI","Platos Fuertes",1,[["costilla de cerdo marinado",400,"g"],["teriyaki",120,"g"],["papa criolla",200,"g"],["pepino",15,"g"],["acelga",5,"g"],["rugula",5,"g"]]],
+ ["SALMON GOLDEN BERRY","Platos Fuertes",1,[["filete de salmon",250,"g"],["arroz con coco",150,"g"],["salsa golden",100,"g"],["pepino",30,"g"],["acelga",5,"g"],["rugula",5,"g"],["mango",70,"g"],["pimenton rojo",30,"g"],["vinagreta nikkei",50,"g"]]],
+ ["MIGNON","Platos Fuertes",1,[["solomo",280,"g"],["papa parda",150,"g"],["salsa demiglace",100,"g"],["quinua",50,"g"],["pepino",15,"g"],["acelga",5,"g"],["rugula",5,"g"],["tocineta",70,"g"],["tomate cherry",50,"g"],["vinagreta nikkei",50,"g"],["cebolla morada",10,"g"],["cilantro",5,"g"]]],
+ ["CHULETA DE CERDO","Platos Fuertes",1,[["bondiola de cerdo",280,"g"],["mccain crispers",150,"g"],["mayo limon",100,"g"],["limon",50,"g"],["pepino",15,"g"],["acelga",5,"g"],["rugula",5,"g"],["tomate cherry",50,"g"]]],
+ ["ENSALADA DE SALMON","Platos Fuertes",1,[["filete de salmon",150,"g"],["almendra",80,"g"],["tomate cherry",100,"g"],["pepino",15,"g"],["acelga",5,"g"],["rugula",5,"g"],["uchuva",100,"g"],["manzana roja",5,"g"],["queso parmesano",50,"g"],["aderezo de mani",100,"g"]]],
+ ["ENSALADA DE POLLO","Platos Fuertes",1,[["pollo",150,"g"],["almendra",80,"g"],["tomate cherry",100,"g"],["pepino",15,"g"],["acelga",5,"g"],["rugula",5,"g"],["queso mozzarella",100,"g"],["teriyaki",50,"g"],["manzana roja",10,"g"],["coco rallado",50,"g"],["aguacate",100,"g"],["vinagreta ponzu",100,"g"]]],
+ ["HOT BURGUER 26","Platos Fuertes",1,[["pan hamburguesa",1,"ud"],["carne de hamburguesa",180,"g"],["lechuga crespa",5,"g"],["queso muenster",25,"g"],["cebolla huevo",50,"g"],["dip de tomate",50,"g"],["pepinillos en queso",50,"g"],["mermelada de chorizo",50,"g"],["mccain crispers",200,"g"]]],
+ ["BURGUER FLOOR FOUR","Platos Fuertes",1,[["pan hamburguesa",1,"ud"],["carne de hamburguesa",180,"g"],["lechuga crespa",5,"g"],["queso muenster",25,"g"],["cebolla huevo",50,"g"],["queso para asar",70,"g"],["salsa bbq",50,"g"],["jarabe con miel",50,"g"],["mccain crispers",200,"g"]]],
+ ["MENU DE NIÑOS","Platos Fuertes",1,[["nuggets de pollo",150,"g"],["croqueta de papa",200,"g"],["jarabe con miel",15,"g"],["helado",120,"g"],["galleta mini",50,"g"],["salsa de chocolate",50,"g"]]],
+ ["ALMA FRANCESA","Postres",1,[["brioche molde",50,"g"],["leche",100,"g"],["canela",5,"g"],["azucar",50,"g"],["helado",120,"g"],["tocineta",50,"g"],["jarabe con miel",50,"g"],["fresa",30,"g"],["huevo",1,"ud"],["salsa de chocolate",30,"g"]]],
+ ["CHEESECAKE","Postres",12,[["crema de leche",800,"g"],["queso crema",500,"g"],["zumo de limon",65,"g"],["azucar",80,"g"],["gelatina sin sabor",20,"g"],["galleta sultana",220,"g"],["agua",150,"g"],["mantequilla",150,"g"]]],
+ ["SOUFLE DE CACAO","Postres",16,[["chocolate 60",500,"g"],["cobertura negra",500,"g"],["mantequilla",500,"g"],["huevo",16,"ud"],["azucar",400,"g"],["naranja",30,"g"],["ron",30,"ml"]]]
+];
+
+const COSTOS_FIJOS = [
+ ["Alquiler",10000000,true],["Nómina",25000000,true],["Process (pasarela)",8500000,true],
+ ["Imboost (marketing)",3600000,true],["Sayco/Cinpro",195100,true],["Contador",1000000,true],
+ ["Cluvi",119900,true],["Efigas (gas)",2550000,true],["Aquamana (agua)",460000,true],
+ ["Chec (energía)",1900000,true],["Compra restaurante (desde agosto)",21000000,false]
+];
+
+/* ============ CONFIGURACIÓN NUBE (Supabase) ============
+   Para activar el modo compartido, pega tus datos de Supabase aquí abajo.
+   Si los dejas vacíos, la app funciona en modo LOCAL (guarda solo en este navegador). */
+const CLOUD={
+  url:"https://anfnsmrctebmrzigxvto.supabase.co",
+  anonKey:"sb_publishable_IpsY4SI-wuA1RRYzsy4-7A_OoxXo-uI",
+  table:"costeo_estado",
+  rowId:1,
+  editPassword:"piso4cuatro" // CAMBIA esta contraseña por la que quieras
+};
+function cloudOn(){return !!(CLOUD.url&&CLOUD.anonKey);}
+
+/* ============ ESTADO / PERSISTENCIA ============ */
+const LS_KEY="costeo_piso4_v1";
+let STATE=load();
+let EDITABLE = !cloudOn();   // en modo local siempre se puede editar; en nube arranca bloqueado
+function load(){try{return JSON.parse(localStorage.getItem(LS_KEY))||{}}catch(e){return{}}}
+function save(){localStorage.setItem(LS_KEY,JSON.stringify(STATE)); if(cloudOn()&&EDITABLE) scheduleCloudPush();}
+/* --- sincronización con la nube --- */
+let pushTimer=null;
+function cloudHeaders(){return {apikey:CLOUD.anonKey,Authorization:'Bearer '+CLOUD.anonKey,'Content-Type':'application/json',Prefer:'return=minimal'};}
+function setStatus(t){const e=document.getElementById('cloudStatus');if(e)e.textContent=t;}
+async function cloudPull(){
+  if(!cloudOn())return;
+  try{
+    const r=await fetch(`${CLOUD.url}/rest/v1/${CLOUD.table}?id=eq.${CLOUD.rowId}&select=data`,{headers:{apikey:CLOUD.anonKey,Authorization:'Bearer '+CLOUD.anonKey}});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const rows=await r.json();
+    if(rows&&rows[0]&&rows[0].data&&Object.keys(rows[0].data).length){STATE=rows[0].data;ensureDefaults();localStorage.setItem(LS_KEY,JSON.stringify(STATE));setStatus('✔ sincronizado con la nube');}
+    else{await cloudPush(true);setStatus('✔ nube inicializada');}   // primera vez: sube el estado local
+  }catch(e){setStatus('⚠ sin conexión — usando datos locales');}
+}
+function scheduleCloudPush(){clearTimeout(pushTimer);pushTimer=setTimeout(()=>cloudPush(),800);}
+async function cloudPush(force){
+  if(!cloudOn())return; if(!EDITABLE&&!force)return;
+  try{
+    setStatus('guardando…');
+    const r=await fetch(`${CLOUD.url}/rest/v1/${CLOUD.table}?id=eq.${CLOUD.rowId}`,{method:'PATCH',headers:cloudHeaders(),body:JSON.stringify({data:STATE})});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    setStatus('✔ guardado en la nube · '+new Date().toLocaleTimeString('es-CO'));
+  }catch(e){setStatus('⚠ error al guardar en la nube');}
+}
+function toggleEdit(){
+  if(EDITABLE){EDITABLE=false;refreshLockUI();return;}
+  const pw=prompt('Contraseña para editar:');
+  if(pw===null)return;
+  if(pw===CLOUD.editPassword){EDITABLE=true;refreshLockUI();cloudPush(true);}
+  else alert('Contraseña incorrecta.');
+}
+function refreshLockUI(){
+  const btn=document.getElementById('editBtn'),ban=document.getElementById('lockBanner');
+  if(!cloudOn()){if(btn)btn.style.display='none';if(ban)ban.style.display='none';return;}
+  if(btn){btn.style.display='';btn.textContent=EDITABLE?'✏️ Editando (clic para bloquear)':'🔒 Editar';}
+  if(ban){ban.style.display='';ban.textContent=EDITABLE?'✏️ Modo edición — tus cambios se guardan en la nube para todos.':'🔒 Modo lectura — los cambios NO se guardan. Clic en “Editar” e ingresa la contraseña para modificar.';}
+}
+function ensureDefaults(){
+  STATE.foodCostDefault = STATE.foodCostDefault ?? 30;
+  STATE.volumenMes = STATE.volumenMes ?? 3000;     // platos vendidos al mes (estimado)
+  STATE.incPct = STATE.incPct ?? 8;                // impuesto al consumo % (Colombia)
+  STATE.dishFoodCost = STATE.dishFoodCost || {};   // por plato
+  STATE.sectionFoodCost = STATE.sectionFoodCost || {}; // por sección
+  STATE.dishPortions = STATE.dishPortions || {};   // override porciones
+  STATE.dishItems = STATE.dishItems || {};         // recetas editadas por plato
+  STATE.map = STATE.map || {};                     // ingrediente -> {prod, costPerUnit, unit}
+  STATE.priceOverride = STATE.priceOverride || {}; // producto -> precio
+  STATE.unitOverride = STATE.unitOverride || {};   // producto -> unidad
+  STATE.customProducts = STATE.customProducts || []; // [{n,cat,unit,price}]
+  STATE.hiddenProducts = STATE.hiddenProducts || {}; // producto -> true (ocultado)
+}
+ensureDefaults();
+// Valores iniciales $/unidad de receta para insumos "por pieza" (editables en Vinculación)
+const SEED={
+ // por pieza ($/ud)
+ "huevo":533,"arepa":6050,"pan hamburguesa":2000,"dedos de queso":2300,"tortilla maiz":229,
+ "palos pincho":150,"empanadas":900,"galleta ducales":265,
+ // por gramo / ml (deducidos de la lista de precios y tamaños de empaque típicos — VERIFICAR)
+ "pollo":16.9,"acelga":3,"lechuga crespa":1.5,"ron":135,
+ "aceite vegetal":20,"aji pajarito":12,"limonaria":8,"albahaca":20,"perejil":15,
+ "panela":13,"romero":30,"sazon completa":20,"tomillo":30,"cerveza negra":11,
+ "coco rallado":40,"supercoco":30,"fondo":3,"laurel":50,"yogurt griego":12,
+ "tomates secos":46,"pepinillo":15,"whisky":158,"queso muenster":36,"condimento granja":4,
+ "chocolate corona":31,"frijol refrito":25,"almeja":35,"pasta doria tallarin":9.2,
+ "manzana roja":15,"galleta mini":21,"salsa de chocolate":14,"brioche molde":25,
+ "canela":40,"galleta sultana":20
+};
+// Sembrar SOLO la primera vez (luego respeta lo que el usuario edite/borre)
+if(!STATE.seeded){
+  for(const k in SEED){STATE.map[k]=STATE.map[k]||{};if(!STATE.map[k].prod&&(STATE.map[k].costPerUnit==null||STATE.map[k].costPerUnit===""))STATE.map[k].costPerUnit=SEED[k];}
+  STATE.seeded=true;
+}
+// Precios CONFIRMADOS por el usuario (catálogo). Se aplican una vez, por encima de los estimados.
+// Las claves están en los nombres usados por las recetas del sistema.
+const CONFIRMADOS={
+ "aceite de oliva":26.34,"aceite oliva":26.34,"aceite olica":26.34,"aceite de sesamo":85.88,
+ "aceite vegetal":6.63,"acelga":2.26,"agua":15.85,"aguacate":10.5,"aji pajarito":56.09,
+ "ajo":22.49,"ajo en polvo":22.49,"ajonjoli":34.41,"albahaca":28,"almeja":33.36,
+ "almendra":108,"anillos de calamar":34.51,"arandanos":58.4,"arepa":1210,"arroz":3.54,
+ "arroz castellano":10,"azucar":5,"bondiola de cerdo":55.9,"brioche molde":31.25,
+ "camaron":27,"canela":9.6,"carbon":19.74,"carne molida":29.9,"cebolla blanca":2.5,
+ "cebolla huevo":2.5,"cebolla larga":6,"cebolla morada":4,"cerveza negra":4195,
+ "champinon":23,"chocolate corona":66.73,"chocolate 60":94,"chorizo":38.4,"cilantro":2,
+ "cobertura negra":56,"coca cola":6.25,"coco rallado":39.86,"contramuslo":1.15,
+ "costilla":90,"costilla de cerdo":23,"costilla san luis":27.91,"crema agria":20.19,
+ "crema de leche":28.3,"croqueta de papa":24.32,"dedos de queso":2300,"empanadas":1661,
+ "fecula de maiz":55.92,"filete de salmon":57.9,"fresa":12,"frijol refrito":21.2,
+ "galleta ducales":31.92,"galleta mini":35.68,"galleta sultana":35.68,"gelatina sin sabor":8,
+ "guayaba":8,"harina de trigo":21.89,"helado":8.48,"hierbabuena":30,"hueso de res":9,
+ "huevo":600,"jarabe con miel":21.03,"jengibre":16,"kiwi":80,"laurel":3.5,"leche":4.25,
+ "lechuga crespa":3.6,"limon":3.2,"limonaria":15,"maiz tierno":10,"mango":6.94,
+ "mantequilla":26,"mantequilla de mani":26.41,"manzana roja":500,"masa de waffle":35,
+ "mayonesa":24.35,"miel":21.03,"mostaza":15.97,"naranja":15,"oregano seco":30,
+ "palos pincho":4.26,"pan hamburguesa":2000,"panceta de cerdo":31.9,"panela":12.9,
+ "panko":20,"papa criolla":7,"papa parda":7,"paprika":37.189,"pasta doria tallarin":8.09,
+ "pepinillo":34.91,"pepino":3,"perejil":2,"pimenton rojo":5,"pimienta":52,"pina":3.89,
+ "pollo":16.9,"punta de anca":32,"queso azul":136.9,"queso campesino":35,"queso costeno":46.8,
+ "queso crema":23.02,"queso mozzarella":34.84,"queso muenster":178.98,"queso para asar":44.16,
+ "queso parmesano":90.2,"quinua":23.39,"romero":3,"ron":82.62,"rugula":18,"sal":2.2,
+ "salsa bbq":17.94,"salsa de chocolate":22.6,"salsa de tomate":16.88,"salsa en polvo tajin":78.82,
+ "salsa soya":13.27,"sazon completa":54.22,"semilla de hinojo":3.5,"solomo":55.9,"soya":13.27,
+ "tinta de calamar":346.16,"tocineta":31.9,"tomate":6,"tomate cherry":19.16,"tomate chonto":5,
+ "tomates secos":37,"tomillo":3.5,"tortilla maiz":229.37,"trucha":35,"uchuva":14,
+ "vinagre":23.25,"vinagre blanco":23.25,"vino blanco":91.84,"vino tinto":24.66,
+ "whisky":147.73,"yogurt griego":22.12,"yuca":57.89,"zumo de limon":12.8,"zumo de naranja":6.6
+};
+const CONFIRM_VERSION="confirmados_2026_06_full";
+if(STATE.confirmedV!==CONFIRM_VERSION){
+  for(const k in CONFIRMADOS){STATE.map[k]=STATE.map[k]||{};STATE.map[k].costPerUnit=CONFIRMADOS[k];delete STATE.map[k].prod;}
+  STATE.confirmedV=CONFIRM_VERSION;
+}
+save();
+
+/* ============ PARSEO DE PRECIOS ============ */
+function parseCSV(text){
+  const rows=[];let row=[],cell="",q=false;
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(q){if(c=='"'){if(text[i+1]=='"'){cell+='"';i++}else q=false}else cell+=c}
+    else{if(c=='"')q=true;else if(c==',' ){row.push(cell);cell=""}
+    else if(c=='\n'){row.push(cell);rows.push(row);row=[];cell=""}
+    else if(c=='\r'){}else cell+=c}}
+  if(cell.length||row.length){row.push(cell);rows.push(row)}
+  return rows;
+}
+let PRODUCTS=[]; // {n, cat, unit, price}
+(function(){
+  const raw=document.getElementById('pricesCSV').textContent;
+  const rows=parseCSV(raw);
+  for(const r of rows){
+    const num=parseFloat(r[0]); const prod=(r[2]||"").trim();
+    const val=parseFloat(r[6]);
+    if(!isNaN(num)&&prod&&!isNaN(val)){
+      PRODUCTS.push({n:prod,cat:(r[1]||"").replace(/^\d+\.\s*/,''),unit:(r[5]||"").trim(),price:val});
+    }
+  }
+})();
+// agregar productos creados por el usuario
+STATE.customProducts.forEach(cp=>{if(!PRODUCTS.some(p=>p.n===cp.n))PRODUCTS.push({n:cp.n,cat:cp.cat,unit:cp.unit,price:cp.price,custom:true});});
+function prodPrice(p){return STATE.priceOverride[p.n]!=null?STATE.priceOverride[p.n]:p.price;}
+function prodUnit(p){return STATE.unitOverride[p.n]!=null?STATE.unitOverride[p.n]:p.unit;}
+function activeProducts(){return PRODUCTS.filter(p=>!STATE.hiddenProducts[p.n]);}
+
+/* ============ NORMALIZACIÓN Y MATCHING ============ */
+function norm(s){return (s||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim();}
+const STOP=new Set(["de","la","el","en","con","x","und","unidad","y","del","a","x1kg","x500g"]);
+function tokens(s){return norm(s).split(" ").filter(t=>t&&!STOP.has(t));}
+function score(a,b){const A=tokens(a),B=new Set(tokens(b));let s=0;for(const t of A)if(B.has(t))s+=t.length;return s;}
+
+// estimar gramos/ml de un paquete a partir del nombre
+function packSize(name){
+  const n=name.toLowerCase().replace(/,/g,'.');
+  let m=n.match(/x?\s*([\d.]+)\s*(kg|kl)\b/); if(m)return parseFloat(m[1])*1000;
+  m=n.match(/x?\s*([\d.]+)\s*(g|gr|grs)\b/); if(m)return parseFloat(m[1]);
+  m=n.match(/x?\s*([\d.]+)\s*(lt|l|lts)\b/); if(m)return parseFloat(m[1])*1000;
+  m=n.match(/x?\s*([\d.]+)\s*(ml|cc)\b/); if(m)return parseFloat(m[1]);
+  return null;
+}
+// nombres de sub-recetas normalizados
+const SUB_NAMES=new Set(SUBRECETAS.map(s=>norm(s[0])));
+const SUB_BY_NORM={};SUBRECETAS.forEach(s=>SUB_BY_NORM[norm(s[0])]=s);
+
+// lista de ingredientes únicos (de platos + subrecetas), excluyendo los que son sub-recetas
+function uniqueIngredients(){
+  const set=new Map();
+  const add=(name)=>{const k=norm(name);if(SUB_NAMES.has(k))return;if(!set.has(k))set.set(k,name);};
+  SUBRECETAS.forEach(s=>s[2].forEach(it=>add(it[0])));
+  PLATOS.forEach(p=>p[3].forEach(it=>add(it[0])));
+  return [...set.entries()].map(([k,name])=>({key:k,name}));
+}
+// autosugerencia de match
+function suggest(ingName){
+  let best=null,bs=0,bd=false;
+  for(const p of activeProducts()){
+    const s=score(ingName,p.n);if(s<=0)continue;
+    const d=autoCostPerUnit(p,'g')!=null;          // ¿podemos deducir $/g o $/ml?
+    if(s>bs || (s===bs && d && !bd)){bs=s;best=p;bd=d;}
+  }
+  return bs>0?best:null;
+}
+// costo por unidad de receta (g/ml/ud) para un ingrediente, según mapping
+// unidad típica con la que se usa un ingrediente en las recetas (para vincular/costear)
+function ingUnitOf(name){
+  const k=norm(name);
+  for(const s of SUBRECETAS)for(const it of s[2])if(norm(it[0])===k)return it[2];
+  for(const p of PLATOS)for(const it of (STATE.dishItems[p[0]]||p[3]))if(norm(it[0])===k)return it[2];
+  return 'g';
+}
+function ingCostPerUnit(ingName,recipeUnit){
+  const ru=recipeUnit||ingUnitOf(ingName);
+  const k=norm(ingName);
+  const m=STATE.map[k];
+  if(m){
+    if(m.costPerUnit!=null && m.costPerUnit!=="") return parseFloat(m.costPerUnit);
+    if(m.prod){const p=PRODUCTS.find(x=>x.n===m.prod);if(p)return autoCostPerUnit(p,ru);}
+  }
+  const s=suggest(ingName);
+  return s?autoCostPerUnit(s,ru):null;
+}
+function autoCostPerUnit(p,ru){
+  const price=prodPrice(p);
+  if(/^(gr|g|ml)$/i.test(prodUnit(p))) return price;  // ya es $/g o $/ml
+  const sz=packSize(p.n);
+  if(sz) return price/sz;                            // $/g o $/ml (paquete por peso/volumen)
+  if(ru==='ud') return price;                        // receta por pieza: precio = $/unidad
+  return null;  // producto por paquete usado en gramos sin tamaño deducible: requiere $/unidad manual
+}
+function currentProdFor(ingName){
+  const k=norm(ingName);const m=STATE.map[k];
+  if(m&&m.prod){const p=PRODUCTS.find(x=>x.n===m.prod);if(p)return p;}
+  return suggest(ingName);
+}
+
+/* ============ COSTEO ============ */
+// costo por gramo de una sub-receta
+const subCache={};
+function subCostPerGram(subNorm){
+  if(subCache[subNorm]!=null)return subCache[subNorm];
+  const s=SUB_BY_NORM[subNorm];if(!s)return null;
+  let total=0,weight=0;
+  for(const [ing,qty,unit] of s[2]){
+    const k=norm(ing);
+    if(SUB_NAMES.has(k)){const cpg=subCostPerGram(k);if(cpg!=null){total+=cpg*qty;if(unit!=="ud")weight+=qty;}continue;}
+    const cpu=ingCostPerUnit(ing,unit);
+    if(cpu!=null){total+=cpu*qty;if(unit!=="ud")weight+=qty;}
+  }
+  const cpg=weight>0?total/weight:null;
+  subCache[subNorm]=cpg;return cpg;
+}
+function subTotalCost(s){
+  let total=0;
+  for(const [ing,qty,unit] of s[2]){
+    const k=norm(ing);
+    if(SUB_NAMES.has(k)){const cpg=subCostPerGram(k);if(cpg!=null)total+=cpg*qty;continue;}
+    const cpu=ingCostPerUnit(ing,unit);if(cpu!=null)total+=cpu*qty;
+  }
+  return total;
+}
+function clearCache(){for(const k in subCache)delete subCache[k];}
+
+// costea una línea de plato; devuelve {cost, prod, cpu, isSub, mapped}
+function costLine(ing,qty,unit){
+  const k=norm(ing);
+  if(SUB_NAMES.has(k)){
+    const cpg=subCostPerGram(k);
+    const c=(cpg!=null)?(unit==="ud"?0:cpg*qty):null;
+    return {cost:c,isSub:true,mapped:cpg!=null,cpu:cpg,prod:"(sub-receta)"};
+  }
+  const p=currentProdFor(ing);
+  const cpu=ingCostPerUnit(ing,unit);
+  const cost=cpu!=null?cpu*qty:null;
+  return {cost,isSub:false,mapped:cpu!=null,cpu,prod:p?p.n:null};
+}
+function dishItems(p){return STATE.dishItems[p[0]]||p[3];}
+function ensureDishItems(name){if(!STATE.dishItems[name]){const p=PLATOS.find(x=>x[0]===name);STATE.dishItems[name]=p[3].map(it=>it.slice());}return STATE.dishItems[name];}
+function dishCost(p){
+  let total=0;
+  for(const [ing,qty,unit] of dishItems(p)){const l=costLine(ing,qty,unit);if(l.cost!=null)total+=l.cost;}
+  return total;
+}
+function dishPortions(p){return STATE.dishPortions[p[0]]??p[2];}
+function dishFoodCost(p){return STATE.dishFoodCost[p[0]] ?? STATE.sectionFoodCost[p[1]] ?? STATE.foodCostDefault;}
+function dishCostPerPortion(p){return dishCost(p)/Math.max(1,dishPortions(p));}
+function suggestedPrice(p){const fc=dishFoodCost(p)/100;return fc>0?dishCostPerPortion(p)/fc:0;}
+function roundPrice(v){return Math.round(v/100)*100;}
+function precioPublico(neto){return roundPrice(neto*(1+(STATE.incPct||0)/100));}
+
+/* ============ UTILIDADES UI ============ */
+function secciones(){const o=[];PLATOS.forEach(p=>{if(!o.includes(p[1]))o.push(p[1]);});return o;}
+function setSectionFC(s,v){if(v===''||v==null)delete STATE.sectionFoodCost[s];else STATE.sectionFoodCost[s]=parseFloat(v);save();showTab('resumen');}
+const fmt=v=>v==null||isNaN(v)?'—':'$'+Math.round(v).toLocaleString('es-CO');
+const fmt2=v=>v==null||isNaN(v)?'—':'$'+v.toLocaleString('es-CO',{maximumFractionDigits:2});
+
+/* ============ TABS ============ */
+const TABS=[["resumen","📋 Resumen / Carta"],["rentabilidad","📈 Rentabilidad"],["platos","🍽 Platos"],["subrecetas","🥣 Sub-recetas"],["vinculacion","🔗 Vinculación insumos"],["insumos","💲 Precios insumos"],["fijos","🏠 Costos fijos"]];
+function buildNav(){
+  const nav=document.getElementById('nav');
+  nav.innerHTML=TABS.map(t=>`<button data-t="${t[0]}" onclick="showTab('${t[0]}')">${t[1]}</button>`).join('');
+}
+function showTab(t){
+  clearCache();
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.t===t));
+  document.getElementById('tab-'+t).classList.add('active');
+  ({resumen:renderResumen,rentabilidad:renderRentabilidad,platos:renderPlatos,subrecetas:renderSub,vinculacion:renderVinc,insumos:renderInsumos,fijos:renderFijos}[t])();
+}
+
+/* ---- RESUMEN ---- */
+function renderResumen(){
+  const dishes=PLATOS.map(p=>({p,cpp:dishCostPerPortion(p),price:roundPrice(suggestedPrice(p)),fc:dishFoodCost(p)}));
+  const avgFc=dishes.reduce((a,d)=>a+d.fc,0)/dishes.length;
+  const um=uniqueIngredients().filter(i=>ingCostPerUnit(i.name)==null).length;
+  let h=`<div class="kpis">
+    <div class="kpi"><div class="v">${PLATOS.length}</div><div class="l">Platos en carta</div></div>
+    <div class="kpi"><div class="v">${SUBRECETAS.length}</div><div class="l">Sub-recetas</div></div>
+    <div class="kpi"><div class="v">${PRODUCTS.length}</div><div class="l">Insumos con precio</div></div>
+    <div class="kpi"><div class="v">${avgFc.toFixed(0)}%</div><div class="l">Food cost promedio</div></div>
+    ${um?`<div class="kpi"><div class="v" style="color:var(--red)">${um}</div><div class="l">Insumos sin vincular</div></div>`:''}
+  </div>`;
+  h+=`<div class="card"><h2>Carta con precio sugerido</h2>
+  <div class="hint">Precio sugerido = costo por porción ÷ food cost %. Ajusta el food cost % en cada plato (pestaña Platos). Precios redondeados a $100.</div>
+  <div class="controls"><label>Food cost % general (si una sección no tiene valor propio):</label><input type="number" id="fcDef" value="${STATE.foodCostDefault}" onchange="STATE.foodCostDefault=parseFloat(this.value)||30;save();showTab('resumen')"> %
+  <label>Impuesto al consumo (INC) %:</label><input type="number" value="${STATE.incPct}" onchange="STATE.incPct=parseFloat(this.value)||0;save();showTab('resumen')" style="width:70px"> %
+  <button class="btn" onclick="exportExcel()">⬇ Exportar a Excel (CSV)</button>
+  <button class="btn" onclick="printReport()">🖨 Imprimir / Guardar PDF</button>
+  <button class="btn" onclick="generateInforme()">📄 Informe gerencial</button></div>
+  <div class="card" style="background:var(--panel2);margin-bottom:16px">
+    <h2 style="font-size:14px">Food cost % por sección</h2>
+    <div class="hint" style="margin-bottom:10px">Define el objetivo de cada sección (editable cuando lo necesites). Si lo dejas vacío usa el general. Un ajuste en un plato individual (pestaña Platos) tiene prioridad sobre estos.</div>
+    <div class="controls" style="background:none;padding:0">${secciones().map(s=>`<label>${s}: <input type="number" class="foodcost-in" value="${STATE.sectionFoodCost[s]??''}" placeholder="${STATE.foodCostDefault}" onchange="setSectionFC('${esc(s)}',this.value)"> %</label>`).join('')}</div>
+  </div>`;
+  const actualFijos=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
+  const fijoPorPlato=STATE.volumenMes>0?actualFijos/STATE.volumenMes:0;
+  h+=`<div class="card" style="background:var(--panel2);margin-bottom:16px">
+    <h2 style="font-size:14px">Rentabilidad neta — reparto de costos fijos</h2>
+    <div class="hint" style="margin-bottom:10px">La utilidad neta resta a cada plato su parte de costos fijos = costos fijos del mes (${fmt(actualFijos)}) ÷ platos vendidos al mes. Ajusta el volumen para ver el efecto.</div>
+    <div class="controls" style="background:none;padding:0">
+      <label>Platos vendidos al mes: <input type="number" value="${STATE.volumenMes}" onchange="STATE.volumenMes=parseFloat(this.value)||0;save();showTab('resumen')" style="width:110px"></label>
+      <span style="color:var(--muted)">→ Costo fijo por plato: <b>${fmt(fijoPorPlato)}</b></span>
+    </div>
+  </div>
+  <div class="scroll"><table><thead><tr><th>Plato</th><th>Sección</th><th class="num">Costo insumos</th><th class="num">Precio neto</th><th class="num">Precio público (+${STATE.incPct}% INC)</th><th class="num">Margen contrib.</th><th class="num">Util. neta/plato</th><th class="num">Rentab. %</th></tr></thead><tbody>`;
+  let sect="";
+  dishes.forEach(d=>{
+    if(d.p[1]!==sect){sect=d.p[1];h+=`<tr><td colspan="8" style="background:var(--panel2);color:var(--accent);font-weight:700">${sect}</td></tr>`;}
+    const mc=d.price-d.cpp;
+    const neta=mc-fijoPorPlato;
+    const rent=d.price>0?neta/d.price*100:0;
+    const col=neta>=0?'var(--green)':'var(--red)';
+    h+=`<tr><td><b>${d.p[0]}</b></td><td>${d.p[1]}</td><td class="num">${fmt(d.cpp)}</td><td class="num">${fmt(d.price)}</td><td class="num price"><b>${fmt(precioPublico(d.price))}</b></td><td class="num">${fmt(mc)}</td><td class="num" style="color:${col};font-weight:700">${fmt(neta)}</td><td class="num" style="color:${col};font-weight:700">${rent.toFixed(0)}%</td></tr>`;
+  });
+  h+=`</tbody></table></div>
+  <div class="hint" style="margin-top:8px">⚠️ La utilidad neta reparte los costos fijos <b>en partes iguales</b> por plato vendido. Es una guía: en la práctica unos platos se venden más que otros. El <b>margen de contribución</b> sigue siendo el indicador más confiable para decidir precios.</div></div>`;
+  document.getElementById('tab-resumen').innerHTML=h;
+}
+
+/* ---- RENTABILIDAD (margen de contribución) ---- */
+function renderRentabilidad(){
+  const dishes=PLATOS.map(p=>{
+    const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p));
+    const mc=price-cpp, mcPct=price>0?mc/price*100:0;
+    return {p,cpp,price,mc,mcPct,fc:dishFoodCost(p)};
+  });
+  const avgMC=dishes.reduce((a,d)=>a+d.mc,0)/dishes.length;
+  const avgMCpct=dishes.reduce((a,d)=>a+d.mcPct,0)/dishes.length;
+  const actual=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
+  const vol=STATE.volumenMes;
+  const mcMes=avgMC*vol;
+  const resultado=mcMes-actual;
+  const equilibrio=avgMC>0?Math.ceil(actual/avgMC):0;
+  let h=`<div class="kpis">
+    <div class="kpi"><div class="v">${fmt(avgMC)}</div><div class="l">Margen contribución promedio / plato</div></div>
+    <div class="kpi"><div class="v">${avgMCpct.toFixed(0)}%</div><div class="l">% contribución promedio</div></div>
+    <div class="kpi"><div class="v">${equilibrio.toLocaleString('es-CO')}</div><div class="l">Punto de equilibrio (platos/mes)</div></div>
+  </div>
+  <div class="card">
+    <h2>Proyección mensual del negocio</h2>
+    <div class="hint">El margen de contribución (precio − costo de insumos) es lo que cada plato aporta para cubrir los costos fijos y dejar utilidad. Aquí ves si el volumen estimado alcanza a cubrir los fijos.</div>
+    <div class="controls">
+      <label>Platos vendidos al mes (estimado): <input type="number" id="volIn" value="${vol}" onchange="STATE.volumenMes=parseFloat(this.value)||0;save();renderRentabilidad()" style="width:110px"></label>
+      <button class="btn" onclick="printReport()">🖨 Descargar / Imprimir PDF</button>
+      <button class="btn ghost" onclick="exportRentabilidad()">⬇ Exportar a Excel (CSV)</button>
+    </div>
+    <table style="max-width:560px">
+      <tr><td>Margen de contribución promedio por plato</td><td class="num">${fmt(avgMC)}</td></tr>
+      <tr><td>× Platos vendidos al mes</td><td class="num">${vol.toLocaleString('es-CO')}</td></tr>
+      <tr style="font-weight:700"><td>= Margen de contribución mensual</td><td class="num">${fmt(mcMes)}</td></tr>
+      <tr><td>− Costos fijos mensuales</td><td class="num">${fmt(actual)}</td></tr>
+      <tr style="font-weight:700;color:${resultado>=0?'var(--green)':'var(--red)'}"><td>= Resultado operativo del mes</td><td class="num">${fmt(resultado)}</td></tr>
+    </table>
+    <div class="hint" style="margin-top:8px">${resultado>=0?`✅ Con ${vol.toLocaleString('es-CO')} platos/mes cubres los fijos y te quedan <b>${fmt(resultado)}</b> de utilidad operativa.`:`⚠️ Con ${vol.toLocaleString('es-CO')} platos/mes NO alcanzas a cubrir los fijos (faltan ${fmt(-resultado)}). Necesitas vender al menos <b>${equilibrio.toLocaleString('es-CO')}</b> platos/mes.`}</div>
+  </div>
+  <div class="card"><h2>Margen de contribución por plato</h2>
+  <div class="hint">Ordena mentalmente: los platos con mayor <b>% de contribución</b> son los más rentables para impulsar en la carta. Precios redondeados a $100.</div>
+  <div class="scroll"><table><thead><tr><th>Plato</th><th>Sección</th><th class="num">Precio</th><th class="num">Costo insumos</th><th class="num">Margen contrib. $</th><th class="num">Margen contrib. %</th></tr></thead><tbody>`;
+  let sect="";
+  dishes.forEach(d=>{
+    if(d.p[1]!==sect){sect=d.p[1];h+=`<tr><td colspan="6" style="background:var(--panel2);color:var(--accent);font-weight:700">${sect}</td></tr>`;}
+    const col=d.mcPct>=70?'var(--green)':(d.mcPct>=60?'var(--accent2)':'var(--red)');
+    h+=`<tr><td><b>${d.p[0]}</b></td><td>${d.p[1]}</td><td class="num">${fmt(d.price)}</td><td class="num">${fmt(d.cpp)}</td><td class="num">${fmt(d.mc)}</td><td class="num" style="color:${col};font-weight:700">${d.mcPct.toFixed(0)}%</td></tr>`;
+  });
+  h+=`</tbody></table></div></div>`;
+  document.getElementById('tab-rentabilidad').innerHTML=h;
+}
+
+/* ---- PLATOS (editable) ---- */
+const OPEN=new Set();
+function toggleDish(n){OPEN.has(n)?OPEN.delete(n):OPEN.add(n);renderPlatos();}
+function productOptions(sel){return activeProducts().map(p=>`<option value="${p.n.replace(/"/g,'&quot;')}"${p.n===sel?' selected':''}>${p.n} (${fmt(prodPrice(p))}/${prodUnit(p)})</option>`).join('');}
+function renderPlatos(){
+  const unitSel=(sel)=>['g','ml','ud'].map(u=>`<option${u===sel?' selected':''}>${u}</option>`).join('');
+  let h=`<div class="card"><h2>Platos · receta editable</h2><div class="hint">Haz clic en un plato para abrirlo. Puedes <b>cambiar cantidades y unidades</b>, <b>el producto al que se vincula cada ingrediente</b> y su <b>$/unidad</b>, además de <b>agregar o quitar ingredientes</b>. Nota: el producto y el $/unidad de un ingrediente son compartidos por todos los platos que usen ese mismo nombre (es el precio del insumo). Si quieres un costo distinto solo para este plato, cambia el nombre del ingrediente.</div></div>`;
+  let sect="";
+  PLATOS.forEach((p)=>{
+    const dn=p[0];
+    if(p[1]!==sect){sect=p[1];h+=`<h3 style="color:var(--accent);margin:18px 0 8px">${sect}</h3>`;}
+    const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p),port=dishPortions(p);
+    const batch=p[2]>1, edited=!!STATE.dishItems[dn], opened=OPEN.has(dn);
+    const E=esc(dn);
+    h+=`<div class="dish${opened?' open':''}">
+      <div class="dish-head" onclick="toggleDish('${E}')">
+        <div><div class="name">${dn} ${edited?'<span class="pill ok">editada</span>':''}</div><div class="sect">${p[1]}${batch?' · receta por lote':''}</div></div>
+        <div class="dish-metrics">
+          <div class="metric"><div class="v">${fmt(cpp)}</div><div class="l">Costo/porción</div></div>
+          <div class="metric"><div class="v price">${fmt(price)}</div><div class="l">Precio sugerido</div></div>
+        </div>
+      </div>
+      <div class="dish-body">
+        <div class="controls">
+          <label>Food cost %: <input type="number" class="foodcost-in" value="${fc}" onchange="STATE.dishFoodCost['${E}']=parseFloat(this.value)||30;save();renderPlatos()"></label>
+          <label>Porciones que rinde: <input type="number" class="foodcost-in" value="${port}" onchange="STATE.dishPortions['${E}']=parseFloat(this.value)||1;save();renderPlatos()"></label>
+          <span style="color:var(--muted)">Costo total receta: <b>${fmt(dishCost(p))}</b></span>
+          ${edited?`<button class="btn ghost" style="padding:5px 10px" onclick="resetDish('${E}')">↺ Restablecer receta original</button>`:''}
+        </div>
+        <table><thead><tr><th style="min-width:140px">Ingrediente</th><th class="num">Cant.</th><th>Und</th><th>Vinculado a (producto)</th><th class="num">$/und</th><th class="num">Costo</th><th></th></tr></thead><tbody>`;
+    dishItems(p).forEach(([ing,qty,unit],j)=>{
+      const l=costLine(ing,qty,unit);
+      const k=norm(ing);
+      const linkCell = l.isSub
+        ? `<span class="pill sub">sub-receta</span>`
+        : `<select class="map" style="max-width:260px" onchange="setProdForIng('${esc(ing)}',this.value)"><option value="">${l.mapped?'(auto)':'— sin vincular —'}</option>${productOptions(currentProdFor(ing)?currentProdFor(ing).n:'')}</select>`;
+      const costEdit = l.isSub ? `${l.cpu!=null?fmt2(l.cpu):'—'}` : `<input class="cost" style="width:80px" value="${l.cpu!=null?(+l.cpu).toFixed(2):''}" onchange="setCostForIng('${esc(ing)}',this.value)">`;
+      h+=`<tr>
+        <td><input value="${(ing||'').replace(/"/g,'&quot;')}" style="width:140px" onchange="setItem('${E}',${j},'ing',this.value)"></td>
+        <td class="num"><input class="cost" style="width:64px" value="${qty}" onchange="setItem('${E}',${j},'qty',this.value)"></td>
+        <td><select onchange="setItem('${E}',${j},'unit',this.value)">${unitSel(unit)}</select></td>
+        <td>${linkCell}</td>
+        <td class="num">${costEdit}</td>
+        <td class="num">${fmt(l.cost)}</td>
+        <td><button class="btn ghost" style="padding:3px 9px" onclick="delItem('${E}',${j})">✕</button></td>
+      </tr>`;
+    });
+    h+=`</tbody></table><button class="btn ghost" style="margin-top:10px" onclick="addItem('${E}')">➕ Agregar ingrediente</button></div></div>`;
+  });
+  document.getElementById('tab-platos').innerHTML=h;
+}
+function setItem(dn,j,field,val){const arr=ensureDishItems(dn);const idx={ing:0,qty:1,unit:2}[field];arr[j][idx]=field==='qty'?(parseFloat(val)||0):val;save();clearCache();renderPlatos();}
+function delItem(dn,j){const arr=ensureDishItems(dn);arr.splice(j,1);save();clearCache();renderPlatos();}
+function addItem(dn){const arr=ensureDishItems(dn);arr.push(["nuevo ingrediente",0,"g"]);OPEN.add(dn);save();renderPlatos();}
+function resetDish(dn){if(confirm('¿Restablecer la receta original de "'+dn+'"? Se perderán los cambios de ingredientes/cantidades de este plato.')){delete STATE.dishItems[dn];save();clearCache();renderPlatos();}}
+function setProdForIng(ing,val){const k=norm(ing);STATE.map[k]=STATE.map[k]||{};if(val===''){delete STATE.map[k].prod;}else{STATE.map[k].prod=val;}STATE.map[k].costPerUnit="";save();clearCache();renderPlatos();}
+function setCostForIng(ing,val){const k=norm(ing);STATE.map[k]=STATE.map[k]||{};STATE.map[k].costPerUnit=val;save();clearCache();renderPlatos();}
+
+/* ---- SUB-RECETAS ---- */
+function renderSub(){
+  let h=`<div class="card"><h2>Sub-recetas (preparaciones base)</h2><div class="hint">Se calcula el costo total del lote, su costo por gramo (usado dentro de los platos) y el costo por porción según el rendimiento indicado.</div></div>`;
+  SUBRECETAS.forEach((s,i)=>{
+    const total=subTotalCost(s),cpg=subCostPerGram(s[1]?norm(s[0]):norm(s[0])),cpp=total/Math.max(1,s[1]);
+    h+=`<div class="dish" id="sub${i}">
+      <div class="dish-head" onclick="document.getElementById('sub${i}').classList.toggle('open')">
+        <div class="name">${s[0]}</div>
+        <div class="dish-metrics">
+          <div class="metric"><div class="v">${fmt(total)}</div><div class="l">Costo lote</div></div>
+          <div class="metric"><div class="v">${fmt2(subCostPerGram(norm(s[0])))}</div><div class="l">Costo/g</div></div>
+          <div class="metric"><div class="v">${fmt(cpp)}</div><div class="l">Costo/porción (${s[1]})</div></div>
+        </div>
+      </div>
+      <div class="dish-body"><table><thead><tr><th>Ingrediente</th><th class="num">Cant.</th><th>Und</th><th>Vinculado a</th><th class="num">$/und</th><th class="num">Costo</th></tr></thead><tbody>`;
+    s[2].forEach(([ing,qty,unit])=>{
+      const l=costLine(ing,qty,unit);
+      const prod=l.mapped?(l.prod||''):`<span class="tag-unmapped">⚠ sin vincular</span>`;
+      h+=`<tr><td>${ing}${l.isSub?' <span class="pill sub">sub</span>':''}</td><td class="num">${qty}</td><td>${unit}</td><td>${prod}</td><td class="num">${l.cpu!=null?fmt2(l.cpu):'—'}</td><td class="num">${fmt(l.cost)}</td></tr>`;
+    });
+    h+=`</tbody></table></div></div>`;
+  });
+  document.getElementById('tab-subrecetas').innerHTML=h;
+}
+
+/* ---- VINCULACIÓN ---- */
+function renderVinc(){
+  const ings=uniqueIngredients().sort((a,b)=>a.name.localeCompare(b.name));
+  const optsFor=sel=>activeProducts().map(p=>`<option value="${p.n.replace(/"/g,'&quot;')}"${p.n===sel?' selected':''}>${p.n} · ${p.cat} (${fmt(prodPrice(p))}/${prodUnit(p)})</option>`).join('');
+  let h=`<div class="card"><h2>Vinculación de ingredientes con insumos</h2>
+  <div class="hint">Cada ingrediente de las recetas se vincula a un producto de la lista de precios. El sistema propone la mejor coincidencia; confírmala o cámbiala. El "$/unidad de receta" se calcula automáticamente (paquete → gramo/ml) pero puedes editarlo manualmente si lo conoces mejor.</div>
+  <input class="search" placeholder="Buscar ingrediente..." oninput="filterVinc(this.value)">
+  <div class="scroll"><table id="vincTable"><thead><tr><th>Ingrediente (receta)</th><th>Vincular a producto</th><th class="num">$/unidad receta</th><th>Estado</th></tr></thead><tbody>`;
+  ings.forEach(ing=>{
+    const k=ing.key;const m=STATE.map[k]||{};
+    const cur=currentProdFor(ing.name);
+    const sel=m.prod||(cur?cur.n:'');
+    const cpu=ingCostPerUnit(ing.name);
+    const mapped=cpu!=null;
+    h+=`<tr data-name="${norm(ing.name)}">
+      <td><b>${ing.name}</b></td>
+      <td><select class="map" onchange="setMap('${k.replace(/'/g,"\\'")}','prod',this.value)">
+        <option value=""${sel?'':' selected'}>— sin vincular —</option>${optsFor(sel)}</select></td>
+      <td class="num"><input class="cost" value="${m.costPerUnit!=null&&m.costPerUnit!==""?m.costPerUnit:(cpu!=null?cpu.toFixed(2):'')}" onchange="setMap('${k.replace(/'/g,"\\'")}','costPerUnit',this.value)"></td>
+      <td>${CONFIRMADOS[k]!=null?'<span class="pill ok">✓ confirmado</span>':(mapped?'<span class="pill ok">vinculado</span>':'<span class="pill warn">pendiente</span>')}</td>
+    </tr>`;
+  });
+  h+=`</tbody></table></div></div>`;
+  document.getElementById('tab-vinculacion').innerHTML=h;
+}
+function setMap(k,field,val){STATE.map[k]=STATE.map[k]||{};STATE.map[k][field]=val;if(field==='prod')STATE.map[k].costPerUnit="";save();clearCache();renderVinc();}
+function filterVinc(q){q=norm(q);document.querySelectorAll('#vincTable tbody tr').forEach(tr=>{tr.style.display=tr.dataset.name.includes(q)?'':'none';});}
+
+/* ---- INSUMOS ---- */
+const UNIDADES=["Gr","ml","Unidad","Bandeja"];
+function unitOptions(sel){return UNIDADES.map(u=>`<option${u===sel?' selected':''}>${u}</option>`).join('');}
+function esc(s){return (s||'').replace(/'/g,"\\'");}
+function renderInsumos(){
+  const cats=[...new Set(PRODUCTS.map(p=>p.cat))].filter(Boolean);
+  const act=activeProducts();
+  let h=`<div class="card"><h2>Precios de insumos (${act.length})</h2>
+  <div class="hint">Edita el <b>precio</b> o la <b>unidad</b> de cualquier insumo (los cambios afectan todos los cálculos al instante). Unidad <b>Gr/ml</b> = el precio es por gramo/mililitro · <b>Unidad</b> = precio por paquete (el sistema deduce el tamaño del nombre, ej. "X500G"). Usa el formulario para agregar insumos que no estén en la lista.</div>
+
+  <div class="card" style="background:var(--panel2);margin-bottom:14px">
+    <h2 style="font-size:14px">➕ Agregar nuevo insumo</h2>
+    <div class="controls" style="background:none;padding:0">
+      <input id="npName" placeholder="Nombre del producto" style="width:240px">
+      <select id="npCat">${cats.map(c=>`<option>${c}</option>`).join('')}</select>
+      <select id="npUnit">${unitOptions('Gr')}</select>
+      <input id="npPrice" type="number" placeholder="Precio" style="width:110px">
+      <button class="btn" onclick="addProduct()">Agregar</button>
+    </div>
+    <div class="hint" style="margin:8px 0 0">Tip: si el insumo se compra por paquete pero lo usas en gramos, elige unidad <b>Gr</b> y pon el <b>precio por gramo</b> (precio del paquete ÷ gramos del paquete).</div>
+  </div>
+
+  <input class="search" placeholder="Buscar producto..." oninput="filterIns(this.value)">
+  <div class="scroll"><table id="insTable"><thead><tr><th>Producto</th><th>Categoría</th><th>Unidad</th><th class="num">Precio</th><th></th></tr></thead><tbody>`;
+  act.forEach(p=>{
+    const nm=esc(p.n);
+    h+=`<tr data-name="${norm(p.n+' '+p.cat)}">
+      <td>${p.n}${p.custom?' <span class="pill sub">nuevo</span>':''}</td>
+      <td>${p.cat}</td>
+      <td><select onchange="setUnit('${nm}',this.value)">${unitOptions(prodUnit(p))}</select></td>
+      <td class="num"><input class="cost" value="${prodPrice(p)}" onchange="setPrice('${nm}',this.value)"></td>
+      <td><button class="btn ghost" style="padding:4px 10px" onclick="delProduct('${nm}',${p.custom?1:0})">${p.custom?'🗑':'ocultar'}</button></td>
+    </tr>`;
+  });
+  h+=`</tbody></table></div></div>`;
+  document.getElementById('tab-insumos').innerHTML=h;
+}
+function setPrice(n,v){STATE.priceOverride[n]=parseFloat(v)||0;const cp=STATE.customProducts.find(x=>x.n===n);if(cp)cp.price=parseFloat(v)||0;save();clearCache();}
+function setUnit(n,v){STATE.unitOverride[n]=v;const cp=STATE.customProducts.find(x=>x.n===n);if(cp)cp.unit=v;save();clearCache();}
+function addProduct(){
+  const n=document.getElementById('npName').value.trim();
+  const cat=document.getElementById('npCat').value;
+  const unit=document.getElementById('npUnit').value;
+  const price=parseFloat(document.getElementById('npPrice').value);
+  if(!n){alert('Escribe el nombre del producto');return;}
+  if(isNaN(price)){alert('Escribe el precio');return;}
+  if(PRODUCTS.some(p=>p.n===n)){alert('Ya existe un producto con ese nombre');return;}
+  STATE.customProducts.push({n,cat,unit,price});PRODUCTS.push({n,cat,unit,price,custom:true});
+  delete STATE.hiddenProducts[n];save();clearCache();renderInsumos();
+}
+function delProduct(n,isCustom){
+  if(isCustom){
+    if(!confirm('¿Eliminar el insumo "'+n+'"?'))return;
+    STATE.customProducts=STATE.customProducts.filter(x=>x.n!==n);
+    PRODUCTS=PRODUCTS.filter(x=>x.n!==n);
+  }else{
+    if(!confirm('¿Ocultar "'+n+'" de la lista? (No se sugerirá en vinculaciones. Puedes restaurarlo con Reiniciar.)'))return;
+    STATE.hiddenProducts[n]=true;
+  }
+  save();clearCache();renderInsumos();
+}
+function filterIns(q){q=norm(q);document.querySelectorAll('#insTable tbody tr').forEach(tr=>{tr.style.display=tr.dataset.name.includes(q)?'':'none';});}
+
+/* ---- COSTOS FIJOS ---- */
+function renderFijos(){
+  const actual=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
+  const futuro=COSTOS_FIJOS.reduce((a,c)=>a+c[1],0);
+  let h=`<div class="kpis">
+    <div class="kpi"><div class="v">${fmt(actual)}</div><div class="l">Costo fijo mensual actual</div></div>
+    <div class="kpi"><div class="v">${fmt(futuro)}</div><div class="l">Mensual desde agosto</div></div>
+  </div>
+  <div class="card"><h2>Costos fijos y variables de operación</h2>
+  <div class="hint">El método de precio usado es <b>food cost %</b>: estos costos fijos se cubren a través del margen (precio = costo insumos ÷ food cost %). Esta tabla es de referencia. Para validar tu food cost % objetivo: costos fijos ÷ ventas mensuales estimadas = % de ventas que se va en operación.</div>
+  <table><thead><tr><th>Concepto</th><th class="num">Valor mensual</th><th>Vigencia</th></tr></thead><tbody>`;
+  COSTOS_FIJOS.forEach(c=>{h+=`<tr><td>${c[0]}</td><td class="num">${fmt(c[1])}</td><td>${c[2]?'Actual':'Desde agosto'}</td></tr>`;});
+  h+=`<tr style="font-weight:700"><td>TOTAL ACTUAL</td><td class="num">${fmt(actual)}</td><td></td></tr>
+  <tr style="font-weight:700"><td>TOTAL DESDE AGOSTO</td><td class="num">${fmt(futuro)}</td><td></td></tr>
+  </tbody></table>
+  <div class="card" style="margin-top:16px;background:var(--panel2)">
+    <h2 style="font-size:15px">Calculadora de punto de equilibrio</h2>
+    <div class="controls">
+      <label>Ticket promedio: $<input type="number" id="ticket" value="45000" onchange="calcBe()"></label>
+      <label>Food cost % objetivo: <input type="number" id="beFc" value="${STATE.foodCostDefault}" onchange="calcBe()"> %</label>
+    </div>
+    <div id="beOut" style="font-size:14px;color:var(--muted)"></div>
+  </div>
+  </div>`;
+  document.getElementById('tab-fijos').innerHTML=h;calcBe();
+}
+function calcBe(){
+  const actual=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
+  const ticket=parseFloat(document.getElementById('ticket').value)||0;
+  const fc=(parseFloat(document.getElementById('beFc').value)||30)/100;
+  const margenContrib=ticket*(1-fc); // ticket menos costo de insumos
+  const platos=margenContrib>0?Math.ceil(actual/margenContrib):0;
+  const ventas=platos*ticket;
+  document.getElementById('beOut').innerHTML=`Con un ticket de <b>${fmt(ticket)}</b> y food cost <b>${(fc*100).toFixed(0)}%</b>, cada plato deja <b>${fmt(margenContrib)}</b> para cubrir costos fijos.<br>Necesitas vender ≈ <b style="color:var(--accent2)">${platos.toLocaleString('es-CO')} platos/mes</b> (≈ ${fmt(ventas)} en ventas) solo para cubrir los costos fijos actuales (${fmt(actual)}).`;
+}
+
+/* ============ EXPORT / IMPORT ============ */
+function exportData(){
+  const blob=new Blob([JSON.stringify(STATE,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='costeo_piso4_respaldo.json';a.click();
+}
+function importData(){
+  const inp=document.createElement('input');inp.type='file';inp.accept='.json';
+  inp.onchange=e=>{const f=e.target.files[0];const r=new FileReader();r.onload=()=>{try{STATE=JSON.parse(r.result);save();location.reload();}catch(err){alert('Archivo inválido')}};r.readAsText(f);};inp.click();
+}
+function resetAll(){if(confirm('¿Borrar todos tus ajustes (vinculaciones, precios editados, food cost)? Los datos originales se mantienen.')){localStorage.removeItem(LS_KEY);location.reload();}}
+function exportExcel(){
+  let csv=`Plato,Seccion,Costo insumos/porcion,Food cost %,Precio neto,Precio publico (+${STATE.incPct}% INC),Utilidad bruta\n`;
+  PLATOS.forEach(p=>{const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p);
+    csv+=`"${p[0]}","${p[1]}",${Math.round(cpp)},${fc},${price},${precioPublico(price)},${price-Math.round(cpp)}\n`;});
+  const blob=new Blob(['﻿'+csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='carta_precios_piso4.csv';a.click();
+}
+function exportRentabilidad(){
+  let csv=`Plato,Seccion,Precio neto,Precio publico (+${STATE.incPct}% INC),Costo insumos,Margen contribucion $,Margen contribucion %\n`;
+  PLATOS.forEach(p=>{const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),mc=price-cpp,mcp=price>0?(mc/price*100):0;
+    csv+=`"${p[0]}","${p[1]}",${price},${precioPublico(price)},${Math.round(cpp)},${Math.round(mc)},${mcp.toFixed(0)}%\n`;});
+  const actual=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
+  const avgMC=PLATOS.reduce((a,p)=>a+(roundPrice(suggestedPrice(p))-dishCostPerPortion(p)),0)/PLATOS.length;
+  csv+=`\n"PROYECCION MENSUAL",,,,,\n`;
+  csv+=`"Margen contribucion promedio/plato",,,,${Math.round(avgMC)},\n`;
+  csv+=`"Platos/mes",,,,${STATE.volumenMes},\n`;
+  csv+=`"Margen contribucion mensual",,,,${Math.round(avgMC*STATE.volumenMes)},\n`;
+  csv+=`"Costos fijos mensuales",,,,${actual},\n`;
+  csv+=`"Resultado operativo del mes",,,,${Math.round(avgMC*STATE.volumenMes-actual)},\n`;
+  const blob=new Blob(['﻿'+csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='rentabilidad_piso4.csv';a.click();
+}
+function printReport(){
+  const hoy=new Date().toLocaleDateString('es-CO',{year:'numeric',month:'long',day:'numeric'});
+  const actual=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
+  const vol=STATE.volumenMes, fijoPorPlato=vol>0?actual/vol:0;
+  let rows="",sect="",tCosto=0,tPrecio=0,tMC=0,tNeta=0;
+  const fcs=[];
+  PLATOS.forEach(p=>{
+    if(p[1]!==sect){sect=p[1];rows+=`<tr class="sec"><td colspan="9">${sect}</td></tr>`;}
+    const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p);
+    const mc=price-cpp, mcPct=price>0?mc/price*100:0;
+    const neta=mc-fijoPorPlato, rent=price>0?neta/price*100:0;
+    tCosto+=cpp;tPrecio+=price;tMC+=mc;tNeta+=neta;fcs.push(fc);
+    const col=mcPct>=70?'#1a7a3c':(mcPct>=60?'#9a7a1e':'#c0392b');
+    const colN=neta>=0?'#1a7a3c':'#c0392b';
+    rows+=`<tr><td>${p[0]}</td><td class="n">${fmt(cpp)}</td><td class="n">${fc}%</td><td class="n pr">${fmt(price)}</td><td class="n pr">${fmt(precioPublico(price))}</td><td class="n">${fmt(mc)}</td><td class="n" style="color:${col};font-weight:bold">${mcPct.toFixed(0)}%</td><td class="n" style="color:${colN};font-weight:bold">${fmt(neta)}</td><td class="n" style="color:${colN};font-weight:bold">${rent.toFixed(0)}%</td></tr>`;
+  });
+  const avgFc=(fcs.reduce((a,b)=>a+b,0)/fcs.length).toFixed(0);
+  const avgMC=tMC/PLATOS.length, mcMes=avgMC*vol, resultado=mcMes-actual, equilibrio=avgMC>0?Math.ceil(actual/avgMC):0;
+  const doc=`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Costeo Piso Cuatro</title>
+  <style>
+  @page{size:A4 landscape;margin:10mm}
+  *{font-family:Arial,Helvetica,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}
+  body{margin:24px;color:#1a1a1a}
+  h1{margin:0;font-size:22px;color:#9a7a1e}
+  .sub{color:#666;font-size:12px;margin-bottom:18px}
+  table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed}
+  th:first-child,td:first-child{width:18%;word-wrap:break-word}
+  th{background:#9a7a1e;color:#fff;text-align:left;padding:6px 8px}
+  th.n,td.n{text-align:right}
+  td{padding:6px 9px;border-bottom:1px solid #ddd}
+  tr.sec td{background:#f3edda;color:#9a7a1e;font-weight:bold;text-transform:uppercase;font-size:11px;letter-spacing:.5px}
+  td.pr{color:#1a7a3c;font-weight:bold}
+  tfoot td{border-top:2px solid #9a7a1e;font-weight:bold;background:#faf7ef}
+  .kpis{display:flex;gap:14px;margin:14px 0 20px}
+  .kpi{border:1px solid #ddd;border-radius:8px;padding:10px 16px}
+  .kpi b{font-size:18px;color:#9a7a1e;display:block}
+  .note{margin-top:18px;font-size:10px;color:#888}
+  @media print{.noprint{display:none}}
+  .btn{background:#9a7a1e;color:#fff;border:none;padding:10px 18px;border-radius:6px;font-size:14px;cursor:pointer;margin-bottom:16px}
+  </style></head><body>
+  <button class="btn noprint" onclick="window.print()">🖨 Imprimir / Guardar como PDF</button>
+  <h1>Piso Cuatro · Costeo de Carta</h1>
+  <div class="sub">Precio de venta sugerido por food cost objetivo · Generado el ${hoy}</div>
+  <div class="kpis">
+    <div class="kpi"><b>${PLATOS.length}</b>platos</div>
+    <div class="kpi"><b>${avgFc}%</b>food cost promedio</div>
+    <div class="kpi"><b>${fmt(tPrecio/PLATOS.length)}</b>precio promedio</div>
+    <div class="kpi"><b>${fmt(actual)}</b>costo fijo mensual</div>
+  </div>
+  <table><thead><tr><th>Plato</th><th class="n">Costo insumos</th><th class="n">Food cost</th><th class="n">Precio neto</th><th class="n">Precio público (+${STATE.incPct}% INC)</th><th class="n">Margen contrib. $</th><th class="n">Margen contrib. %</th><th class="n">Util. neta/plato</th><th class="n">Rentab. %</th></tr></thead>
+  <tbody>${rows}</tbody>
+  <tfoot><tr><td>PROMEDIO</td><td class="n">${fmt(tCosto/PLATOS.length)}</td><td class="n">${avgFc}%</td><td class="n">${fmt(tPrecio/PLATOS.length)}</td><td class="n">${fmt(precioPublico(tPrecio/PLATOS.length))}</td><td class="n">${fmt(avgMC)}</td><td class="n">${(100-avgFc).toFixed(0)}%</td><td class="n">${fmt(tNeta/PLATOS.length)}</td><td class="n">${(tPrecio>0?(tNeta/tPrecio*100):0).toFixed(0)}%</td></tr></tfoot>
+  </table>
+  <div class="note" style="margin-top:6px">Utilidad neta = margen de contribución − costo fijo por plato (${fmt(fijoPorPlato)} = costos fijos ${fmt(actual)} ÷ ${vol.toLocaleString('es-CO')} platos/mes). Reparto en partes iguales por plato vendido; es una guía (el volumen real cambia el resultado).</div>
+
+  <h2 style="font-size:16px;color:#9a7a1e;margin-top:26px">Proyección mensual del negocio</h2>
+  <table style="max-width:520px;table-layout:auto"><colgroup><col style="width:auto"><col style="width:140px"></colgroup>
+    <tr><td>Margen de contribución promedio por plato</td><td class="n">${fmt(avgMC)}</td></tr>
+    <tr><td>Platos vendidos al mes (estimado)</td><td class="n">${vol.toLocaleString('es-CO')}</td></tr>
+    <tr style="font-weight:bold"><td>Margen de contribución mensual</td><td class="n">${fmt(mcMes)}</td></tr>
+    <tr><td>Costos fijos mensuales</td><td class="n">${fmt(actual)}</td></tr>
+    <tr style="font-weight:bold;color:${resultado>=0?'#1a7a3c':'#c0392b'}"><td>Resultado operativo del mes</td><td class="n">${fmt(resultado)}</td></tr>
+    <tr><td>Punto de equilibrio (platos/mes)</td><td class="n">${equilibrio.toLocaleString('es-CO')}</td></tr>
+  </table>
+
+  <div class="note">Precio sugerido = costo de insumos por porción ÷ food cost % objetivo. Margen de contribución = precio − costo de insumos (lo que cada plato aporta para cubrir costos fijos y generar utilidad). Los costos fijos no se prorratean por plato; se cubren con el margen a nivel global. Precios redondeados a $100. Proyección calculada con ${vol.toLocaleString('es-CO')} platos/mes.</div>
+  </body></html>`;
+  const w=window.open('','_blank');
+  if(w&&w.document){w.document.write(doc);w.document.close();}
+  else{
+    const blob=new Blob([doc],{type:'text/html;charset=utf-8'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='reporte_costeo_piso4.html';a.click();
+    alert('Tu navegador bloqueó la ventana emergente. Descargué el reporte como archivo HTML.\\n\\nÁbrelo (doble clic) y usa Ctrl+P → "Guardar como PDF" para enviarlo al comité.');
+  }
+}
+
+function generateInforme(){
+  const hoy=new Date().toLocaleDateString('es-CO',{year:'numeric',month:'long',day:'numeric'});
+  const inc=STATE.incPct, vol=STATE.volumenMes;
+  const actual=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
+  const fpp=vol>0?actual/vol:0;
+  const ds=PLATOS.map(p=>{const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p),mc=price-cpp,mcp=price>0?mc/price*100:0,neta=mc-fpp,rent=price>0?neta/price*100:0;return{n:p[0],sec:p[1],cpp,price,pub:precioPublico(price),fc,mc,mcp,neta,rent};});
+  const n=ds.length, avg=f=>ds.reduce((a,d)=>a+f(d),0)/n;
+  const avgCosto=avg(d=>d.cpp),avgPrecio=avg(d=>d.price),avgPub=avg(d=>d.pub),avgMC=avg(d=>d.mc),avgMCpct=avg(d=>d.mcp),avgFc=avg(d=>d.fc),avgNeta=avg(d=>d.neta);
+  const mcMes=avgMC*vol, resultado=mcMes-actual, equilibrio=avgMC>0?Math.ceil(actual/avgMC):0;
+  const negs=ds.filter(d=>d.neta<0);
+  const topNet=[...ds].sort((a,b)=>b.rent-a.rent).slice(0,5);
+  const fcMin=Math.min(...ds.map(d=>d.fc)), fcMax=Math.max(...ds.map(d=>d.fc));
+  const fcTxt = fcMin===fcMax? `un food cost objetivo del ${fcMin.toFixed(0)}%` : `food cost objetivo entre ${fcMin.toFixed(0)}% y ${fcMax.toFixed(0)}% según el plato`;
+  let rows="",sect="";
+  ds.forEach(d=>{
+    if(d.sec!==sect){sect=d.sec;rows+=`<tr class="sec"><td colspan="9">${sect}</td></tr>`;}
+    const cN=d.neta>=0?'pos':'neg';
+    rows+=`<tr><td>${d.n}</td><td class="n">${d.fc}%</td><td class="n">${fmt(d.cpp)}</td><td class="n">${fmt(d.price)}</td><td class="n">${fmt(d.pub)}</td><td class="n">${fmt(d.mc)}</td><td class="n">${d.mcp.toFixed(0)}%</td><td class="n ${cN}">${fmt(d.neta)}</td><td class="n ${cN}">${d.rent.toFixed(0)}%</td></tr>`;
+  });
+  const negList = negs.length
+    ? `<div class="alert"><b>${negs.length} plato(s) no cubren su costo fijo por plato</b> (a ${vol.toLocaleString('es-CO')} platos/mes): ${negs.map(d=>d.n+' ('+d.rent.toFixed(0)+'%)').join(', ')}. Son platos cuyo margen de contribución absoluto no alcanza a absorber el costo fijo asignado de ${fmt(fpp)}. Conviene revisar su precio o impulsar volumen; no necesariamente eliminarlos.</div>`
+    : `<div class="ok">Todos los platos cubren su costo fijo asignado de ${fmt(fpp)} a ${vol.toLocaleString('es-CO')} platos/mes. La carta es rentable plato a plato en este escenario.</div>`;
+  const doc=`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Informe Sistema de Costos · Piso Cuatro</title><style>
+  @page{size:A4 landscape;margin:14mm}
+  *{font-family:Calibri,Arial,sans-serif;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body{margin:0;color:#222;line-height:1.5;font-size:12px}.wrap{max-width:1000px;margin:0 auto;padding:24px}
+  h1{font-size:24px;color:#9a7a1e;margin:0 0 2px}h2{font-size:16px;color:#9a7a1e;border-bottom:2px solid #e0cda0;padding-bottom:4px;margin-top:24px}
+  h3{font-size:13px;margin:14px 0 6px}.meta{color:#666;font-size:11px}
+  .cover{border-left:5px solid #9a7a1e;padding:12px 16px;background:#faf7ef;border-radius:4px;margin:16px 0}
+  table{width:100%;border-collapse:collapse;font-size:10.5px;margin:8px 0}th{background:#9a7a1e;color:#fff;text-align:left;padding:5px 7px}
+  th.n,td.n{text-align:right}td{padding:4px 7px;border-bottom:1px solid #e2e2e2}
+  tr.sec td{background:#f3edda;color:#9a7a1e;font-weight:bold;text-transform:uppercase;font-size:10px}
+  tfoot td{border-top:2px solid #9a7a1e;font-weight:bold;background:#faf7ef}.pos{color:#1a7a3c;font-weight:bold}.neg{color:#c0392b;font-weight:bold}
+  .kpis{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}.kpi{border:1px solid #ddd;border-radius:8px;padding:9px 14px;min-width:140px}
+  .kpi b{display:block;font-size:18px;color:#9a7a1e}.kpi span{font-size:10.5px;color:#666}
+  ul{margin:6px 0;padding-left:20px}li{margin:3px 0}.alert{background:#fdf0ef;border-left:4px solid #c0392b;padding:8px 12px;border-radius:4px;margin:8px 0}
+  .ok{background:#eef7f0;border-left:4px solid #1a7a3c;padding:8px 12px;border-radius:4px;margin:8px 0}.note{font-size:10px;color:#888;margin-top:6px}
+  .btn{background:#9a7a1e;color:#fff;border:none;padding:10px 18px;border-radius:6px;font-size:14px;cursor:pointer;margin-bottom:14px}@media print{.noprint{display:none}.wrap{padding:0}}
+  </style></head><body><div class="wrap">
+  <button class="btn noprint" onclick="window.print()">🖨 Imprimir / Guardar como PDF</button>
+  <h1>Informe del Sistema de Costos</h1>
+  <div class="meta"><b>Restaurante:</b> Piso Cuatro · <b>Tema:</b> Costeo de platos y precios de venta · <b>Fecha:</b> ${hoy}</div>
+  <div class="meta"><b>Preparado para:</b> Gerencia · <b>Preparado por:</b> Consultoría de Ingeniería de Menú</div>
+  <div class="cover"><b>Resumen ejecutivo.</b> El sistema costea los <b>${n} platos</b> de la carta a partir de <b>${SUBRECETAS.length} sub-recetas</b> y un catálogo de precios confirmado, y propone precios con ${fcTxt}. El <b>margen de contribución promedio es ${avgMCpct.toFixed(0)}%</b> y el <b>precio público promedio ${fmt(avgPub)}</b> (incluye ${inc}% de impuesto al consumo). Con <b>${vol.toLocaleString('es-CO')} platos/mes</b>, el resultado operativo proyectado es <b class="${resultado>=0?'pos':'neg'}">${fmt(resultado)}/mes</b>. Punto de equilibrio: <b>${equilibrio.toLocaleString('es-CO')} platos/mes</b>.${negs.length?` Se identifican <b>${negs.length} plato(s)</b> que requieren revisión de precio.`:''}</div>
+
+  <h2>1. Objetivo y metodología</h2>
+  <p>Conocer el costo real de cada plato y fijar precios con criterio técnico. <b>Precio = costo de insumos ÷ food cost % objetivo</b> (configurable por plato/sección). El <b>precio público</b> agrega el ${inc}% de impuesto al consumo (no es ingreso del restaurante; los márgenes se miden sobre el precio neto). Los <b>costos fijos no se prorratean en el precio</b>; se cubren con el margen a nivel global. La utilidad neta indicativa reparte los fijos en partes iguales por plato vendido.</p>
+
+  <h2>2. Resultados generales</h2>
+  <div class="kpis">
+   <div class="kpi"><b>${n}</b><span>Platos costeados</span></div>
+   <div class="kpi"><b>${fmt(avgCosto)}</b><span>Costo insumos prom.</span></div>
+   <div class="kpi"><b>${fmt(avgPrecio)}</b><span>Precio neto prom.</span></div>
+   <div class="kpi"><b>${fmt(avgPub)}</b><span>Precio público prom. (+${inc}%)</span></div>
+   <div class="kpi"><b>${avgMCpct.toFixed(0)}%</b><span>Margen contrib. prom.</span></div>
+   <div class="kpi"><b>${equilibrio.toLocaleString('es-CO')}</b><span>Equilibrio (platos/mes)</span></div>
+  </div>
+  <h3>Proyección mensual (escenario: ${vol.toLocaleString('es-CO')} platos/mes)</h3>
+  <table style="max-width:520px;table-layout:auto">
+   <tr><td>Margen de contribución promedio por plato</td><td class="n">${fmt(avgMC)}</td></tr>
+   <tr><td>× Platos vendidos al mes</td><td class="n">${vol.toLocaleString('es-CO')}</td></tr>
+   <tr style="font-weight:bold"><td>= Margen de contribución mensual</td><td class="n">${fmt(mcMes)}</td></tr>
+   <tr><td>− Costos fijos mensuales</td><td class="n">${fmt(actual)}</td></tr>
+   <tr style="font-weight:bold" class="${resultado>=0?'pos':'neg'}"><td>= Resultado operativo del mes</td><td class="n">${fmt(resultado)}</td></tr>
+  </table>
+
+  <h2>3. Rentabilidad por plato</h2>
+  <p>Costo fijo asignado por plato: <b>${fmt(fpp)}</b> (${fmt(actual)} ÷ ${vol.toLocaleString('es-CO')} platos/mes). Precios redondeados a $100.</p>
+  <table><thead><tr><th>Plato</th><th class="n">Food cost</th><th class="n">Costo ins.</th><th class="n">Precio neto</th><th class="n">Precio público</th><th class="n">M. contrib. $</th><th class="n">M. contrib. %</th><th class="n">Util. neta</th><th class="n">Rentab. %</th></tr></thead>
+  <tbody>${rows}</tbody>
+  <tfoot><tr><td>PROMEDIO</td><td class="n">${avgFc.toFixed(0)}%</td><td class="n">${fmt(avgCosto)}</td><td class="n">${fmt(avgPrecio)}</td><td class="n">${fmt(avgPub)}</td><td class="n">${fmt(avgMC)}</td><td class="n">${avgMCpct.toFixed(0)}%</td><td class="n">${fmt(avgNeta)}</td><td class="n">${(avgPrecio>0?avgNeta/avgPrecio*100:0).toFixed(0)}%</td></tr></tfoot></table>
+
+  <h2>4. Hallazgos clave</h2>
+  ${negList}
+  <ul>
+   <li><b>Platos más rentables (utilidad neta):</b> ${topNet.map(d=>d.n+' ('+d.rent.toFixed(0)+'%)').join(', ')}. Conviene impulsarlos en la carta.</li>
+   <li><b>Sensibilidad al volumen:</b> el negocio es rentable por encima de ${equilibrio.toLocaleString('es-CO')} platos/mes; a mayor volumen, el costo fijo por plato baja y mejora la rentabilidad neta de todos los platos.</li>
+   <li><b>Insumos a validar:</b> revisar periódicamente los precios de proteínas y productos de mar (volátiles) en el sistema.</li>
+  </ul>
+
+  <h2>5. Recomendaciones</h2>
+  <ul>
+   <li>Ajustar precio o food cost de los platos de baja rentabilidad neta${negs.length?` (${negs.map(d=>d.n).join(', ')})`:''}, o tratarlos como productos "gancho" sostenidos por el volumen.</li>
+   <li>Impulsar los platos de mayor rentabilidad mediante ubicación en la carta, sugerencia del mesero y promociones.</li>
+   <li>Fijar y monitorear una meta de volumen mensual (mínimo ${equilibrio.toLocaleString('es-CO')} platos para no perder).</li>
+   <li>Actualizar los precios de insumos en el sistema cada vez que cambien las compras.</li>
+  </ul>
+  <p class="note">Informe generado automáticamente desde el sistema de costos de Piso Cuatro con los datos vigentes (food cost por plato, INC ${inc}%, ${vol.toLocaleString('es-CO')} platos/mes). Generado el ${hoy}.</p>
+  </div></body></html>`;
+  const w=window.open('','_blank');
+  if(w&&w.document){w.document.write(doc);w.document.close();}
+  else{const blob=new Blob([doc],{type:'text/html;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='informe_sistema_costos_piso4.html';a.click();alert('Tu navegador bloqueó la ventana. Descargué el informe como archivo HTML: ábrelo y usa Ctrl+P para guardarlo como PDF.');}
+}
+
+/* ============ INIT ============ */
+buildNav();
+refreshLockUI();
+if(cloudOn()){
+  setStatus('cargando desde la nube…');
+  cloudPull().then(()=>{ showTab('resumen'); });
+  // refresco periódico para que los lectores vean cambios de otros (solo si no estás editando)
+  setInterval(()=>{ if(!EDITABLE){ cloudPull().then(()=>{ const act=document.querySelector('nav button.active'); if(act) showTab(act.dataset.t); }); } }, 25000);
+}else{
+  showTab('resumen');
+}
+</script>
+</body>
+</html>
