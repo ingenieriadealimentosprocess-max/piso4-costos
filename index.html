@@ -581,6 +581,11 @@ function ensureDefaults(){
   STATE.unitOverride = STATE.unitOverride || {};   // producto -> unidad
   STATE.customProducts = STATE.customProducts || []; // [{n,cat,unit,price}]
   STATE.hiddenProducts = STATE.hiddenProducts || {}; // producto -> true (ocultado)
+  STATE.customPlatos = STATE.customPlatos || [];   // [{n,sec,port}] platos nuevos (items en dishItems)
+  STATE.customSubs = STATE.customSubs || [];       // [{n,y}] sub-recetas nuevas (items en subItems)
+  STATE.subItems = STATE.subItems || {};           // sub -> items editados [[ing,qty,unit]]
+  STATE.subYield = STATE.subYield || {};           // sub -> rendimiento editado
+  STATE.hiddenPlatos = STATE.hiddenPlatos || {};   // plato base -> true (ocultado)
 }
 ensureDefaults();
 // Valores iniciales $/unidad de receta para insumos "por pieza" (editables en Vinculación)
@@ -688,16 +693,29 @@ function packSize(name){
   m=n.match(/x?\s*([\d.]+)\s*(ml|cc)\b/); if(m)return parseFloat(m[1]);
   return null;
 }
-// nombres de sub-recetas normalizados
-const SUB_NAMES=new Set(SUBRECETAS.map(s=>norm(s[0])));
-const SUB_BY_NORM={};SUBRECETAS.forEach(s=>SUB_BY_NORM[norm(s[0])]=s);
+// ===== Platos y sub-recetas dinámicos (base + creados/editados por el usuario) =====
+function allPlatos(){
+  const base=PLATOS.filter(p=>!STATE.hiddenPlatos[p[0]]);
+  const custom=(STATE.customPlatos||[]).map(cp=>[cp.n,cp.sec,cp.port||1,STATE.dishItems[cp.n]||[]]);
+  return base.concat(custom);
+}
+function subList(){
+  const base=SUBRECETAS.map(s=>[s[0], STATE.subYield[s[0]]??s[1], STATE.subItems[s[0]]||s[2]]);
+  const custom=(STATE.customSubs||[]).map(cs=>[cs.n, STATE.subYield[cs.n]??(cs.y||1), STATE.subItems[cs.n]||[]]);
+  return base.concat(custom);
+}
+let _subNames=new Set(), _subByNorm={};
+function rebuildSubIndex(){_subNames=new Set();_subByNorm={};subList().forEach(s=>{const k=norm(s[0]);_subNames.add(k);_subByNorm[k]=s;});}
+function isSub(k){return _subNames.has(k);}
+function subByNorm(k){return _subByNorm[k];}
+rebuildSubIndex();
 
 // lista de ingredientes únicos (de platos + subrecetas), excluyendo los que son sub-recetas
 function uniqueIngredients(){
   const set=new Map();
-  const add=(name)=>{const k=norm(name);if(SUB_NAMES.has(k))return;if(!set.has(k))set.set(k,name);};
-  SUBRECETAS.forEach(s=>s[2].forEach(it=>add(it[0])));
-  PLATOS.forEach(p=>p[3].forEach(it=>add(it[0])));
+  const add=(name)=>{const k=norm(name);if(isSub(k))return;if(!set.has(k))set.set(k,name);};
+  subList().forEach(s=>s[2].forEach(it=>add(it[0])));
+  allPlatos().forEach(p=>p[3].forEach(it=>add(it[0])));
   return [...set.entries()].map(([k,name])=>({key:k,name}));
 }
 // autosugerencia de match
@@ -748,11 +766,11 @@ function currentProdFor(ingName){
 const subCache={};
 function subCostPerGram(subNorm){
   if(subCache[subNorm]!=null)return subCache[subNorm];
-  const s=SUB_BY_NORM[subNorm];if(!s)return null;
+  const s=subByNorm(subNorm);if(!s)return null;
   let total=0,weight=0;
   for(const [ing,qty,unit] of s[2]){
     const k=norm(ing);
-    if(SUB_NAMES.has(k)){const cpg=subCostPerGram(k);if(cpg!=null){total+=cpg*qty;if(unit!=="ud")weight+=qty;}continue;}
+    if(isSub(k)){const cpg=subCostPerGram(k);if(cpg!=null){total+=cpg*qty;if(unit!=="ud")weight+=qty;}continue;}
     const cpu=ingCostPerUnit(ing,unit);
     if(cpu!=null){total+=cpu*qty;if(unit!=="ud")weight+=qty;}
   }
@@ -763,17 +781,17 @@ function subTotalCost(s){
   let total=0;
   for(const [ing,qty,unit] of s[2]){
     const k=norm(ing);
-    if(SUB_NAMES.has(k)){const cpg=subCostPerGram(k);if(cpg!=null)total+=cpg*qty;continue;}
+    if(isSub(k)){const cpg=subCostPerGram(k);if(cpg!=null)total+=cpg*qty;continue;}
     const cpu=ingCostPerUnit(ing,unit);if(cpu!=null)total+=cpu*qty;
   }
   return total;
 }
-function clearCache(){for(const k in subCache)delete subCache[k];}
+function clearCache(){for(const k in subCache)delete subCache[k];rebuildSubIndex();}
 
 // costea una línea de plato; devuelve {cost, prod, cpu, isSub, mapped}
 function costLine(ing,qty,unit){
   const k=norm(ing);
-  if(SUB_NAMES.has(k)){
+  if(isSub(k)){
     const cpg=subCostPerGram(k);
     const c=(cpg!=null)?(unit==="ud"?0:cpg*qty):null;
     return {cost:c,isSub:true,mapped:cpg!=null,cpu:cpg,prod:"(sub-receta)"};
@@ -784,7 +802,7 @@ function costLine(ing,qty,unit){
   return {cost,isSub:false,mapped:cpu!=null,cpu,prod:p?p.n:null};
 }
 function dishItems(p){return STATE.dishItems[p[0]]||p[3];}
-function ensureDishItems(name){if(!STATE.dishItems[name]){const p=PLATOS.find(x=>x[0]===name);STATE.dishItems[name]=p[3].map(it=>it.slice());}return STATE.dishItems[name];}
+function ensureDishItems(name){if(!STATE.dishItems[name]){const p=allPlatos().find(x=>x[0]===name);STATE.dishItems[name]=(p?p[3]:[]).map(it=>it.slice());}return STATE.dishItems[name];}
 function dishCost(p){
   let total=0;
   for(const [ing,qty,unit] of dishItems(p)){const l=costLine(ing,qty,unit);if(l.cost!=null)total+=l.cost;}
@@ -798,7 +816,7 @@ function roundPrice(v){return Math.round(v/100)*100;}
 function precioPublico(neto){return roundPrice(neto*(1+(STATE.incPct||0)/100));}
 
 /* ============ UTILIDADES UI ============ */
-function secciones(){const o=[];PLATOS.forEach(p=>{if(!o.includes(p[1]))o.push(p[1]);});return o;}
+function secciones(){const o=[];allPlatos().forEach(p=>{if(!o.includes(p[1]))o.push(p[1]);});return o;}
 function setSectionFC(s,v){if(v===''||v==null)delete STATE.sectionFoodCost[s];else STATE.sectionFoodCost[s]=parseFloat(v);save();showTab('resumen');}
 const fmt=v=>v==null||isNaN(v)?'—':'$'+Math.round(v).toLocaleString('es-CO');
 const fmt2=v=>v==null||isNaN(v)?'—':'$'+v.toLocaleString('es-CO',{maximumFractionDigits:2});
@@ -819,11 +837,11 @@ function showTab(t){
 
 /* ---- RESUMEN ---- */
 function renderResumen(){
-  const dishes=PLATOS.map(p=>({p,cpp:dishCostPerPortion(p),price:roundPrice(suggestedPrice(p)),fc:dishFoodCost(p)}));
+  const dishes=allPlatos().map(p=>({p,cpp:dishCostPerPortion(p),price:roundPrice(suggestedPrice(p)),fc:dishFoodCost(p)}));
   const avgFc=dishes.reduce((a,d)=>a+d.fc,0)/dishes.length;
   const um=uniqueIngredients().filter(i=>ingCostPerUnit(i.name)==null).length;
   let h=`<div class="kpis">
-    <div class="kpi"><div class="v">${PLATOS.length}</div><div class="l">Platos en carta</div></div>
+    <div class="kpi"><div class="v">${allPlatos().length}</div><div class="l">Platos en carta</div></div>
     <div class="kpi"><div class="v">${SUBRECETAS.length}</div><div class="l">Sub-recetas</div></div>
     <div class="kpi"><div class="v">${PRODUCTS.length}</div><div class="l">Insumos con precio</div></div>
     <div class="kpi"><div class="v">${avgFc.toFixed(0)}%</div><div class="l">Food cost promedio</div></div>
@@ -868,7 +886,7 @@ function renderResumen(){
 
 /* ---- RENTABILIDAD (margen de contribución) ---- */
 function renderRentabilidad(){
-  const dishes=PLATOS.map(p=>{
+  const dishes=allPlatos().map(p=>{
     const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p));
     const mc=price-cpp, mcPct=price>0?mc/price*100:0;
     return {p,cpp,price,mc,mcPct,fc:dishFoodCost(p)};
@@ -919,19 +937,23 @@ function renderRentabilidad(){
 const OPEN=new Set();
 function toggleDish(n){OPEN.has(n)?OPEN.delete(n):OPEN.add(n);renderPlatos();}
 function productOptions(sel){return activeProducts().map(p=>`<option value="${p.n.replace(/"/g,'&quot;')}"${p.n===sel?' selected':''}>${p.n} (${fmt(prodPrice(p))}/${prodUnit(p)})</option>`).join('');}
+// llena las opciones del select solo al enfocarlo (rendimiento: evita 331 opciones × cientos de filas)
+function fillProd(sel){if(sel.dataset.filled)return;const cur=sel.value;sel.innerHTML='<option value="">— sin vincular —</option>'+productOptions('');sel.value=cur;sel.dataset.filled='1';}
 function renderPlatos(){
   const unitSel=(sel)=>['g','ml','ud'].map(u=>`<option${u===sel?' selected':''}>${u}</option>`).join('');
-  let h=`<div class="card"><h2>Platos · receta editable</h2><div class="hint">Haz clic en un plato para abrirlo. Puedes <b>cambiar cantidades y unidades</b>, <b>el producto al que se vincula cada ingrediente</b> y su <b>$/unidad</b>, además de <b>agregar o quitar ingredientes</b>. Nota: el producto y el $/unidad de un ingrediente son compartidos por todos los platos que usen ese mismo nombre (es el precio del insumo). Si quieres un costo distinto solo para este plato, cambia el nombre del ingrediente.</div></div>`;
+  let h=`<div class="card"><h2>Platos · receta editable</h2><div class="hint">Haz clic en un plato para abrirlo. Puedes <b>cambiar cantidades y unidades</b>, <b>el producto al que se vincula cada ingrediente</b> y su <b>$/unidad</b>, además de <b>agregar o quitar ingredientes</b>. Nota: el producto y el $/unidad de un ingrediente son compartidos por todos los platos que usen ese mismo nombre. Si quieres un costo distinto solo para este plato, cambia el nombre del ingrediente.</div>
+  <button class="btn" onclick="addPlato()">➕ Agregar plato nuevo</button></div>`;
   let sect="";
-  PLATOS.forEach((p)=>{
+  allPlatos().forEach((p)=>{
     const dn=p[0];
     if(p[1]!==sect){sect=p[1];h+=`<h3 style="color:var(--accent);margin:18px 0 8px">${sect}</h3>`;}
     const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p),port=dishPortions(p);
-    const batch=p[2]>1, edited=!!STATE.dishItems[dn], opened=OPEN.has(dn);
+    const isCustom=(STATE.customPlatos||[]).some(cp=>cp.n===dn);
+    const batch=p[2]>1, edited=!isCustom&&!!STATE.dishItems[dn], opened=OPEN.has(dn);
     const E=esc(dn);
     h+=`<div class="dish${opened?' open':''}">
       <div class="dish-head" onclick="toggleDish('${E}')">
-        <div><div class="name">${dn} ${edited?'<span class="pill ok">editada</span>':''}</div><div class="sect">${p[1]}${batch?' · receta por lote':''}</div></div>
+        <div><div class="name">${dn} ${isCustom?'<span class="pill sub">nuevo</span>':(edited?'<span class="pill ok">editada</span>':'')}</div><div class="sect">${p[1]}${batch?' · receta por lote':''}</div></div>
         <div class="dish-metrics">
           <div class="metric"><div class="v">${fmt(cpp)}</div><div class="l">Costo/porción</div></div>
           <div class="metric"><div class="v price">${fmt(price)}</div><div class="l">Precio sugerido</div></div>
@@ -943,14 +965,17 @@ function renderPlatos(){
           <label>Porciones que rinde: <input type="number" class="foodcost-in" value="${port}" onchange="STATE.dishPortions['${E}']=parseFloat(this.value)||1;save();renderPlatos()"></label>
           <span style="color:var(--muted)">Costo total receta: <b>${fmt(dishCost(p))}</b></span>
           ${edited?`<button class="btn ghost" style="padding:5px 10px" onclick="resetDish('${E}')">↺ Restablecer receta original</button>`:''}
+          <button class="btn ghost" style="padding:5px 10px" onclick="delPlato('${E}',${isCustom?1:0})">${isCustom?'🗑 Eliminar plato':'Ocultar plato'}</button>
         </div>
         <table><thead><tr><th style="min-width:140px">Ingrediente</th><th class="num">Cant.</th><th>Und</th><th>Vinculado a (producto)</th><th class="num">$/und</th><th class="num">Costo</th><th></th></tr></thead><tbody>`;
     dishItems(p).forEach(([ing,qty,unit],j)=>{
       const l=costLine(ing,qty,unit);
       const k=norm(ing);
+      const curProd = currentProdFor(ing)?currentProdFor(ing).n:'';
+      const curLbl = curProd?curProd.replace(/</g,'&lt;'):(l.mapped?'(auto)':'— sin vincular —');
       const linkCell = l.isSub
         ? `<span class="pill sub">sub-receta</span>`
-        : `<select class="map" style="max-width:260px" onchange="setProdForIng('${esc(ing)}',this.value)"><option value="">${l.mapped?'(auto)':'— sin vincular —'}</option>${productOptions(currentProdFor(ing)?currentProdFor(ing).n:'')}</select>`;
+        : `<select class="map" style="max-width:260px" onfocus="fillProd(this)" onchange="setProdForIng('${esc(ing)}',this.value)"><option value="${curProd.replace(/"/g,'&quot;')}">${curLbl}</option></select>`;
       const costEdit = l.isSub ? `${l.cpu!=null?fmt2(l.cpu):'—'}` : `<input class="cost" style="width:80px" value="${l.cpu!=null?(+l.cpu).toFixed(2):''}" onchange="setCostForIng('${esc(ing)}',this.value)">`;
       h+=`<tr>
         <td><input value="${(ing||'').replace(/"/g,'&quot;')}" style="width:140px" onchange="setItem('${E}',${j},'ing',this.value)"></td>
@@ -970,32 +995,94 @@ function setItem(dn,j,field,val){const arr=ensureDishItems(dn);const idx={ing:0,
 function delItem(dn,j){const arr=ensureDishItems(dn);arr.splice(j,1);save();clearCache();renderPlatos();}
 function addItem(dn){const arr=ensureDishItems(dn);arr.push(["nuevo ingrediente",0,"g"]);OPEN.add(dn);save();renderPlatos();}
 function resetDish(dn){if(confirm('¿Restablecer la receta original de "'+dn+'"? Se perderán los cambios de ingredientes/cantidades de este plato.')){delete STATE.dishItems[dn];save();clearCache();renderPlatos();}}
-function setProdForIng(ing,val){const k=norm(ing);STATE.map[k]=STATE.map[k]||{};if(val===''){delete STATE.map[k].prod;}else{STATE.map[k].prod=val;}STATE.map[k].costPerUnit="";save();clearCache();renderPlatos();}
-function setCostForIng(ing,val){const k=norm(ing);STATE.map[k]=STATE.map[k]||{};STATE.map[k].costPerUnit=val;save();clearCache();renderPlatos();}
+function refreshActive(){const a=document.querySelector('nav button.active');if(a)showTab(a.dataset.t);}
+function setProdForIng(ing,val){const k=norm(ing);STATE.map[k]=STATE.map[k]||{};if(val===''){delete STATE.map[k].prod;}else{STATE.map[k].prod=val;}STATE.map[k].costPerUnit="";save();clearCache();refreshActive();}
+function setCostForIng(ing,val){const k=norm(ing);STATE.map[k]=STATE.map[k]||{};STATE.map[k].costPerUnit=val;save();clearCache();refreshActive();}
+function addPlato(){
+  const n=(prompt('Nombre del plato nuevo:')||'').trim(); if(!n)return;
+  if(allPlatos().some(p=>norm(p[0])===norm(n))){alert('Ya existe un plato con ese nombre.');return;}
+  const secs=secciones();
+  const sec=(prompt('Sección del plato:\n('+secs.join(' · ')+')\nEscribe una de esas o una nueva:', secs[0]||'Platos Fuertes')||'Otros').trim();
+  STATE.customPlatos.push({n:n,sec:sec,port:1});
+  STATE.dishItems[n]=[["nuevo ingrediente",0,"g"]];
+  OPEN.add(n);save();clearCache();renderPlatos();
+}
+function delPlato(dn,isCustom){
+  if(isCustom){ if(!confirm('¿Eliminar el plato "'+dn+'"? Esta acción no se puede deshacer.'))return;
+    STATE.customPlatos=STATE.customPlatos.filter(x=>x.n!==dn);
+    delete STATE.dishItems[dn];delete STATE.dishFoodCost[dn];delete STATE.dishPortions[dn];
+  } else { if(!confirm('¿Ocultar el plato "'+dn+'" de la carta? (Puedes recuperarlo con Reiniciar.)'))return; STATE.hiddenPlatos[dn]=true; }
+  save();clearCache();renderPlatos();
+}
 
-/* ---- SUB-RECETAS ---- */
+/* ---- SUB-RECETAS (editable) ---- */
+const SUBOPEN=new Set();
+function toggleSub(n){SUBOPEN.has(n)?SUBOPEN.delete(n):SUBOPEN.add(n);renderSub();}
+function ensureSubItems(sn){if(!STATE.subItems[sn]){const s=subList().find(x=>x[0]===sn);STATE.subItems[sn]=((s?s[2]:[])).map(it=>it.slice());}return STATE.subItems[sn];}
 function renderSub(){
-  let h=`<div class="card"><h2>Sub-recetas (preparaciones base)</h2><div class="hint">Se calcula el costo total del lote, su costo por gramo (usado dentro de los platos) y el costo por porción según el rendimiento indicado.</div></div>`;
-  SUBRECETAS.forEach((s,i)=>{
-    const total=subTotalCost(s),cpg=subCostPerGram(s[1]?norm(s[0]):norm(s[0])),cpp=total/Math.max(1,s[1]);
-    h+=`<div class="dish" id="sub${i}">
-      <div class="dish-head" onclick="document.getElementById('sub${i}').classList.toggle('open')">
-        <div class="name">${s[0]}</div>
+  const unitSel=(sel)=>['g','ml','ud'].map(u=>`<option${u===sel?' selected':''}>${u}</option>`).join('');
+  let h=`<div class="card"><h2>Sub-recetas · editable</h2><div class="hint">Preparaciones base (salsas, teriyaki, etc.). Se calcula el costo del lote, el costo por gramo (que usan los platos) y el costo por porción según el rendimiento. Puedes editar ingredientes, cantidades, el rendimiento, y crear o eliminar sub-recetas.</div>
+  <button class="btn" onclick="addSub()">➕ Agregar sub-receta nueva</button></div>`;
+  subList().forEach(s=>{
+    const sn=s[0], E=esc(sn), opened=SUBOPEN.has(sn);
+    const isCustom=(STATE.customSubs||[]).some(cs=>cs.n===sn);
+    const edited=!isCustom&&(!!STATE.subItems[sn]||STATE.subYield[sn]!=null);
+    const total=subTotalCost(s), cpg=subCostPerGram(norm(sn)), cpp=total/Math.max(1,s[1]);
+    h+=`<div class="dish${opened?' open':''}">
+      <div class="dish-head" onclick="toggleSub('${E}')">
+        <div class="name">${sn} ${isCustom?'<span class="pill sub">nueva</span>':(edited?'<span class="pill ok">editada</span>':'')}</div>
         <div class="dish-metrics">
           <div class="metric"><div class="v">${fmt(total)}</div><div class="l">Costo lote</div></div>
-          <div class="metric"><div class="v">${fmt2(subCostPerGram(norm(s[0])))}</div><div class="l">Costo/g</div></div>
-          <div class="metric"><div class="v">${fmt(cpp)}</div><div class="l">Costo/porción (${s[1]})</div></div>
+          <div class="metric"><div class="v">${fmt2(cpg)}</div><div class="l">Costo/g</div></div>
+          <div class="metric"><div class="v">${fmt(cpp)}</div><div class="l">Costo/porción</div></div>
         </div>
       </div>
-      <div class="dish-body"><table><thead><tr><th>Ingrediente</th><th class="num">Cant.</th><th>Und</th><th>Vinculado a</th><th class="num">$/und</th><th class="num">Costo</th></tr></thead><tbody>`;
-    s[2].forEach(([ing,qty,unit])=>{
+      <div class="dish-body">
+        <div class="controls">
+          <label>Rendimiento (porciones): <input type="number" class="foodcost-in" value="${s[1]}" onchange="setSubYield('${E}',this.value)"></label>
+          ${edited?`<button class="btn ghost" style="padding:5px 10px" onclick="resetSub('${E}')">↺ Restablecer original</button>`:''}
+          ${isCustom?`<button class="btn ghost" style="padding:5px 10px" onclick="delSub('${E}')">🗑 Eliminar</button>`:''}
+        </div>
+        <table><thead><tr><th style="min-width:140px">Ingrediente</th><th class="num">Cant.</th><th>Und</th><th>Vinculado a (producto)</th><th class="num">$/und</th><th class="num">Costo</th><th></th></tr></thead><tbody>`;
+    s[2].forEach(([ing,qty,unit],j)=>{
       const l=costLine(ing,qty,unit);
-      const prod=l.mapped?(l.prod||''):`<span class="tag-unmapped">⚠ sin vincular</span>`;
-      h+=`<tr><td>${ing}${l.isSub?' <span class="pill sub">sub</span>':''}</td><td class="num">${qty}</td><td>${unit}</td><td>${prod}</td><td class="num">${l.cpu!=null?fmt2(l.cpu):'—'}</td><td class="num">${fmt(l.cost)}</td></tr>`;
+      const curProd = currentProdFor(ing)?currentProdFor(ing).n:'';
+      const curLbl = curProd?curProd.replace(/</g,'&lt;'):(l.mapped?'(auto)':'— sin vincular —');
+      const linkCell = l.isSub
+        ? `<span class="pill sub">sub-receta</span>`
+        : `<select class="map" style="max-width:240px" onfocus="fillProd(this)" onchange="setProdForIng('${esc(ing)}',this.value)"><option value="${curProd.replace(/"/g,'&quot;')}">${curLbl}</option></select>`;
+      const costEdit = l.isSub ? `${l.cpu!=null?fmt2(l.cpu):'—'}` : `<input class="cost" style="width:80px" value="${l.cpu!=null?(+l.cpu).toFixed(2):''}" onchange="setCostForIng('${esc(ing)}',this.value)">`;
+      h+=`<tr>
+        <td><input value="${(ing||'').replace(/"/g,'&quot;')}" style="width:140px" onchange="setSubItem('${E}',${j},'ing',this.value)"></td>
+        <td class="num"><input class="cost" style="width:64px" value="${qty}" onchange="setSubItem('${E}',${j},'qty',this.value)"></td>
+        <td><select onchange="setSubItem('${E}',${j},'unit',this.value)">${unitSel(unit)}</select></td>
+        <td>${linkCell}</td>
+        <td class="num">${costEdit}</td>
+        <td class="num">${fmt(l.cost)}</td>
+        <td><button class="btn ghost" style="padding:3px 9px" onclick="delSubItem('${E}',${j})">✕</button></td>
+      </tr>`;
     });
-    h+=`</tbody></table></div></div>`;
+    h+=`</tbody></table><button class="btn ghost" style="margin-top:10px" onclick="addSubItem('${E}')">➕ Agregar ingrediente</button></div></div>`;
   });
   document.getElementById('tab-subrecetas').innerHTML=h;
+}
+function setSubItem(sn,j,field,val){const arr=ensureSubItems(sn);const idx={ing:0,qty:1,unit:2}[field];arr[j][idx]=field==='qty'?(parseFloat(val)||0):val;save();clearCache();renderSub();}
+function delSubItem(sn,j){const arr=ensureSubItems(sn);arr.splice(j,1);save();clearCache();renderSub();}
+function addSubItem(sn){const arr=ensureSubItems(sn);arr.push(["nuevo ingrediente",0,"g"]);SUBOPEN.add(sn);save();clearCache();renderSub();}
+function setSubYield(sn,val){STATE.subYield[sn]=parseFloat(val)||1;save();clearCache();renderSub();}
+function resetSub(sn){if(confirm('¿Restablecer la sub-receta original "'+sn+'"?')){delete STATE.subItems[sn];delete STATE.subYield[sn];save();clearCache();renderSub();}}
+function addSub(){
+  const n=(prompt('Nombre de la sub-receta nueva:')||'').trim(); if(!n)return;
+  if(subList().some(s=>norm(s[0])===norm(n))){alert('Ya existe una sub-receta con ese nombre.');return;}
+  const y=parseFloat(prompt('¿Cuántas porciones rinde el lote?','10'))||1;
+  STATE.customSubs.push({n:n,y:y});
+  STATE.subItems[n]=[["nuevo ingrediente",0,"g"]];
+  SUBOPEN.add(n);save();clearCache();renderSub();
+}
+function delSub(sn){
+  if(!confirm('¿Eliminar la sub-receta "'+sn+'"? Si algún plato la usa, ese ingrediente quedará sin costo.'))return;
+  STATE.customSubs=STATE.customSubs.filter(x=>x.n!==sn);delete STATE.subItems[sn];delete STATE.subYield[sn];
+  save();clearCache();renderSub();
 }
 
 /* ---- VINCULACIÓN ---- */
@@ -1137,16 +1224,16 @@ function importData(){
 function resetAll(){if(confirm('¿Borrar todos tus ajustes (vinculaciones, precios editados, food cost)? Los datos originales se mantienen.')){localStorage.removeItem(LS_KEY);location.reload();}}
 function exportExcel(){
   let csv=`Plato,Seccion,Costo insumos/porcion,Food cost %,Precio neto,Precio publico (+${STATE.incPct}% INC),Utilidad bruta\n`;
-  PLATOS.forEach(p=>{const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p);
+  allPlatos().forEach(p=>{const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p);
     csv+=`"${p[0]}","${p[1]}",${Math.round(cpp)},${fc},${price},${precioPublico(price)},${price-Math.round(cpp)}\n`;});
   const blob=new Blob(['﻿'+csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='carta_precios_piso4.csv';a.click();
 }
 function exportRentabilidad(){
   let csv=`Plato,Seccion,Precio neto,Precio publico (+${STATE.incPct}% INC),Costo insumos,Margen contribucion $,Margen contribucion %\n`;
-  PLATOS.forEach(p=>{const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),mc=price-cpp,mcp=price>0?(mc/price*100):0;
+  allPlatos().forEach(p=>{const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),mc=price-cpp,mcp=price>0?(mc/price*100):0;
     csv+=`"${p[0]}","${p[1]}",${price},${precioPublico(price)},${Math.round(cpp)},${Math.round(mc)},${mcp.toFixed(0)}%\n`;});
   const actual=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
-  const avgMC=PLATOS.reduce((a,p)=>a+(roundPrice(suggestedPrice(p))-dishCostPerPortion(p)),0)/PLATOS.length;
+  const avgMC=allPlatos().reduce((a,p)=>a+(roundPrice(suggestedPrice(p))-dishCostPerPortion(p)),0)/allPlatos().length;
   csv+=`\n"PROYECCION MENSUAL",,,,,\n`;
   csv+=`"Margen contribucion promedio/plato",,,,${Math.round(avgMC)},\n`;
   csv+=`"Platos/mes",,,,${STATE.volumenMes},\n`;
@@ -1161,7 +1248,7 @@ function printReport(){
   const vol=STATE.volumenMes, fijoPorPlato=vol>0?actual/vol:0;
   let rows="",sect="",tCosto=0,tPrecio=0,tMC=0,tNeta=0;
   const fcs=[];
-  PLATOS.forEach(p=>{
+  allPlatos().forEach(p=>{
     if(p[1]!==sect){sect=p[1];rows+=`<tr class="sec"><td colspan="9">${sect}</td></tr>`;}
     const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p);
     const mc=price-cpp, mcPct=price>0?mc/price*100:0;
@@ -1172,7 +1259,7 @@ function printReport(){
     rows+=`<tr><td>${p[0]}</td><td class="n">${fmt(cpp)}</td><td class="n">${fc}%</td><td class="n pr">${fmt(price)}</td><td class="n pr">${fmt(precioPublico(price))}</td><td class="n">${fmt(mc)}</td><td class="n" style="color:${col};font-weight:bold">${mcPct.toFixed(0)}%</td><td class="n" style="color:${colN};font-weight:bold">${fmt(neta)}</td><td class="n" style="color:${colN};font-weight:bold">${rent.toFixed(0)}%</td></tr>`;
   });
   const avgFc=(fcs.reduce((a,b)=>a+b,0)/fcs.length).toFixed(0);
-  const avgMC=tMC/PLATOS.length, mcMes=avgMC*vol, resultado=mcMes-actual, equilibrio=avgMC>0?Math.ceil(actual/avgMC):0;
+  const avgMC=tMC/allPlatos().length, mcMes=avgMC*vol, resultado=mcMes-actual, equilibrio=avgMC>0?Math.ceil(actual/avgMC):0;
   const doc=`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Costeo Piso Cuatro</title>
   <style>
   @page{size:A4 landscape;margin:10mm}
@@ -1199,14 +1286,14 @@ function printReport(){
   <h1>Piso Cuatro · Costeo de Carta</h1>
   <div class="sub">Precio de venta sugerido por food cost objetivo · Generado el ${hoy}</div>
   <div class="kpis">
-    <div class="kpi"><b>${PLATOS.length}</b>platos</div>
+    <div class="kpi"><b>${allPlatos().length}</b>platos</div>
     <div class="kpi"><b>${avgFc}%</b>food cost promedio</div>
-    <div class="kpi"><b>${fmt(tPrecio/PLATOS.length)}</b>precio promedio</div>
+    <div class="kpi"><b>${fmt(tPrecio/allPlatos().length)}</b>precio promedio</div>
     <div class="kpi"><b>${fmt(actual)}</b>costo fijo mensual</div>
   </div>
   <table><thead><tr><th>Plato</th><th class="n">Costo insumos</th><th class="n">Food cost</th><th class="n">Precio neto</th><th class="n">Precio público (+${STATE.incPct}% INC)</th><th class="n">Margen contrib. $</th><th class="n">Margen contrib. %</th><th class="n">Util. neta/plato</th><th class="n">Rentab. %</th></tr></thead>
   <tbody>${rows}</tbody>
-  <tfoot><tr><td>PROMEDIO</td><td class="n">${fmt(tCosto/PLATOS.length)}</td><td class="n">${avgFc}%</td><td class="n">${fmt(tPrecio/PLATOS.length)}</td><td class="n">${fmt(precioPublico(tPrecio/PLATOS.length))}</td><td class="n">${fmt(avgMC)}</td><td class="n">${(100-avgFc).toFixed(0)}%</td><td class="n">${fmt(tNeta/PLATOS.length)}</td><td class="n">${(tPrecio>0?(tNeta/tPrecio*100):0).toFixed(0)}%</td></tr></tfoot>
+  <tfoot><tr><td>PROMEDIO</td><td class="n">${fmt(tCosto/allPlatos().length)}</td><td class="n">${avgFc}%</td><td class="n">${fmt(tPrecio/allPlatos().length)}</td><td class="n">${fmt(precioPublico(tPrecio/allPlatos().length))}</td><td class="n">${fmt(avgMC)}</td><td class="n">${(100-avgFc).toFixed(0)}%</td><td class="n">${fmt(tNeta/allPlatos().length)}</td><td class="n">${(tPrecio>0?(tNeta/tPrecio*100):0).toFixed(0)}%</td></tr></tfoot>
   </table>
   <div class="note" style="margin-top:6px">Utilidad neta = margen de contribución − costo fijo por plato (${fmt(fijoPorPlato)} = costos fijos ${fmt(actual)} ÷ ${vol.toLocaleString('es-CO')} platos/mes). Reparto en partes iguales por plato vendido; es una guía (el volumen real cambia el resultado).</div>
 
@@ -1236,7 +1323,7 @@ function generateInforme(){
   const inc=STATE.incPct, vol=STATE.volumenMes;
   const actual=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
   const fpp=vol>0?actual/vol:0;
-  const ds=PLATOS.map(p=>{const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p),mc=price-cpp,mcp=price>0?mc/price*100:0,neta=mc-fpp,rent=price>0?neta/price*100:0;return{n:p[0],sec:p[1],cpp,price,pub:precioPublico(price),fc,mc,mcp,neta,rent};});
+  const ds=allPlatos().map(p=>{const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p),mc=price-cpp,mcp=price>0?mc/price*100:0,neta=mc-fpp,rent=price>0?neta/price*100:0;return{n:p[0],sec:p[1],cpp,price,pub:precioPublico(price),fc,mc,mcp,neta,rent};});
   const n=ds.length, avg=f=>ds.reduce((a,d)=>a+f(d),0)/n;
   const avgCosto=avg(d=>d.cpp),avgPrecio=avg(d=>d.price),avgPub=avg(d=>d.pub),avgMC=avg(d=>d.mc),avgMCpct=avg(d=>d.mcp),avgFc=avg(d=>d.fc),avgNeta=avg(d=>d.neta);
   const mcMes=avgMC*vol, resultado=mcMes-actual, equilibrio=avgMC>0?Math.ceil(actual/avgMC):0;
