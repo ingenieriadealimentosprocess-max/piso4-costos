@@ -586,7 +586,11 @@ function ensureDefaults(){
   STATE.subItems = STATE.subItems || {};           // sub -> items editados [[ing,qty,unit]]
   STATE.subYield = STATE.subYield || {};           // sub -> rendimiento editado
   STATE.hiddenPlatos = STATE.hiddenPlatos || {};   // plato base -> true (ocultado)
+  STATE.fixedCosts = STATE.fixedCosts || COSTOS_FIJOS.map(c=>({name:c[0],value:c[1],active:c[2]})); // costos fijos editables
 }
+function fixedList(){return STATE.fixedCosts||[];}
+function fixedActual(){return fixedList().filter(c=>c.active).reduce((a,c)=>a+(parseFloat(c.value)||0),0);}
+function fixedTotal(){return fixedList().reduce((a,c)=>a+(parseFloat(c.value)||0),0);}
 ensureDefaults();
 // Valores iniciales $/unidad de receta para insumos "por pieza" (editables en Vinculación)
 const SEED={
@@ -736,7 +740,7 @@ function ingUnitOf(name){
   for(const p of PLATOS)for(const it of (STATE.dishItems[p[0]]||p[3]))if(norm(it[0])===k)return it[2];
   return 'g';
 }
-function ingCostPerUnit(ingName,recipeUnit){
+function rawCostPerUnit(ingName,recipeUnit){
   const ru=recipeUnit||ingUnitOf(ingName);
   const k=norm(ingName);
   const m=STATE.map[k];
@@ -746,6 +750,14 @@ function ingCostPerUnit(ingName,recipeUnit){
   }
   const s=suggest(ingName);
   return s?autoCostPerUnit(s,ru):null;
+}
+// factor de merma: si un ingrediente pierde X% al limpiarlo/pelarlo, el costo real sube (compras 1/(1-X))
+function mermaOf(k){const m=STATE.map[k]&&parseFloat(STATE.map[k].merma);return (m>0)?Math.min(m,95):0;}
+function mermaFactor(k){const m=mermaOf(k);return m>0?1/(1-m/100):1;}
+function ingCostPerUnit(ingName,recipeUnit){
+  const base=rawCostPerUnit(ingName,recipeUnit);
+  if(base==null)return null;
+  return base*mermaFactor(norm(ingName));
 }
 function autoCostPerUnit(p,ru){
   const price=prodPrice(p);
@@ -859,7 +871,7 @@ function renderResumen(){
     <div class="hint" style="margin-bottom:10px">Define el objetivo de cada sección (editable cuando lo necesites). Si lo dejas vacío usa el general. Un ajuste en un plato individual (pestaña Platos) tiene prioridad sobre estos.</div>
     <div class="controls" style="background:none;padding:0">${secciones().map(s=>`<label>${s}: <input type="number" class="foodcost-in" value="${STATE.sectionFoodCost[s]??''}" placeholder="${STATE.foodCostDefault}" onchange="setSectionFC('${esc(s)}',this.value)"> %</label>`).join('')}</div>
   </div>`;
-  const actualFijos=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
+  const actualFijos=fixedActual();
   const fijoPorPlato=STATE.volumenMes>0?actualFijos/STATE.volumenMes:0;
   h+=`<div class="card" style="background:var(--panel2);margin-bottom:16px">
     <h2 style="font-size:14px">Rentabilidad neta — reparto de costos fijos</h2>
@@ -893,7 +905,7 @@ function renderRentabilidad(){
   });
   const avgMC=dishes.reduce((a,d)=>a+d.mc,0)/dishes.length;
   const avgMCpct=dishes.reduce((a,d)=>a+d.mcPct,0)/dishes.length;
-  const actual=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
+  const actual=fixedActual();
   const vol=STATE.volumenMes;
   const mcMes=avgMC*vol;
   const resultado=mcMes-actual;
@@ -942,7 +954,13 @@ function fillProd(sel){if(sel.dataset.filled)return;const cur=sel.value;sel.inne
 function renderPlatos(){
   const unitSel=(sel)=>['g','ml','ud'].map(u=>`<option${u===sel?' selected':''}>${u}</option>`).join('');
   let h=`<div class="card"><h2>Platos · receta editable</h2><div class="hint">Haz clic en un plato para abrirlo. Puedes <b>cambiar cantidades y unidades</b>, <b>el producto al que se vincula cada ingrediente</b> y su <b>$/unidad</b>, además de <b>agregar o quitar ingredientes</b>. Nota: el producto y el $/unidad de un ingrediente son compartidos por todos los platos que usen ese mismo nombre. Si quieres un costo distinto solo para este plato, cambia el nombre del ingrediente.</div>
-  <button class="btn" onclick="addPlato()">➕ Agregar plato nuevo</button></div>`;
+  <div class="controls" style="margin-top:10px;background:var(--panel2)">
+    <b style="color:var(--accent)">➕ Nuevo plato:</b>
+    <input id="npDishName" placeholder="Nombre del plato" style="width:210px">
+    <input id="npDishSec" list="secDatalist" placeholder="Categoría (elige o escribe nueva)" style="width:250px">
+    <datalist id="secDatalist">${secciones().map(s=>`<option value="${s.replace(/"/g,'&quot;')}">`).join('')}</datalist>
+    <button class="btn" onclick="addPlato()">Agregar plato</button>
+  </div></div>`;
   let sect="";
   allPlatos().forEach((p)=>{
     const dn=p[0];
@@ -999,10 +1017,10 @@ function refreshActive(){const a=document.querySelector('nav button.active');if(
 function setProdForIng(ing,val){const k=norm(ing);STATE.map[k]=STATE.map[k]||{};if(val===''){delete STATE.map[k].prod;}else{STATE.map[k].prod=val;}STATE.map[k].costPerUnit="";save();clearCache();refreshActive();}
 function setCostForIng(ing,val){const k=norm(ing);STATE.map[k]=STATE.map[k]||{};STATE.map[k].costPerUnit=val;save();clearCache();refreshActive();}
 function addPlato(){
-  const n=(prompt('Nombre del plato nuevo:')||'').trim(); if(!n)return;
+  const nEl=document.getElementById('npDishName'), sEl=document.getElementById('npDishSec');
+  const n=(nEl?nEl.value:'').trim(); if(!n){alert('Escribe el nombre del plato.');return;}
   if(allPlatos().some(p=>norm(p[0])===norm(n))){alert('Ya existe un plato con ese nombre.');return;}
-  const secs=secciones();
-  const sec=(prompt('Sección del plato:\n('+secs.join(' · ')+')\nEscribe una de esas o una nueva:', secs[0]||'Platos Fuertes')||'Otros').trim();
+  const sec=(sEl?sEl.value:'').trim()||'Otros';
   STATE.customPlatos.push({n:n,sec:sec,port:1});
   STATE.dishItems[n]=[["nuevo ingrediente",0,"g"]];
   OPEN.add(n);save();clearCache();renderPlatos();
@@ -1090,20 +1108,23 @@ function renderVinc(){
   const ings=uniqueIngredients().sort((a,b)=>a.name.localeCompare(b.name));
   const optsFor=sel=>activeProducts().map(p=>`<option value="${p.n.replace(/"/g,'&quot;')}"${p.n===sel?' selected':''}>${p.n} · ${p.cat} (${fmt(prodPrice(p))}/${prodUnit(p)})</option>`).join('');
   let h=`<div class="card"><h2>Vinculación de ingredientes con insumos</h2>
-  <div class="hint">Cada ingrediente de las recetas se vincula a un producto de la lista de precios. El sistema propone la mejor coincidencia; confírmala o cámbiala. El "$/unidad de receta" se calcula automáticamente (paquete → gramo/ml) pero puedes editarlo manualmente si lo conoces mejor.</div>
+  <div class="hint">Cada ingrediente se vincula a un producto; el "$/unidad base" es el precio de compra por gramo/ml/ud. La <b>% merma</b> es lo que se pierde al limpiar/pelar/deshuesar (ej. un aguacate con 30% de merma: de 100 g comprados solo rinden 70 g útiles). El sistema sube el costo real automáticamente: <b>$/efectivo = $/base ÷ (1 − merma)</b>. Ese efectivo es el que usan las recetas.</div>
   <input class="search" placeholder="Buscar ingrediente..." oninput="filterVinc(this.value)">
-  <div class="scroll"><table id="vincTable"><thead><tr><th>Ingrediente (receta)</th><th>Vincular a producto</th><th class="num">$/unidad receta</th><th>Estado</th></tr></thead><tbody>`;
+  <div class="scroll"><table id="vincTable"><thead><tr><th>Ingrediente (receta)</th><th>Vincular a producto</th><th class="num">$/unidad base</th><th class="num">% merma</th><th class="num">$/efectivo</th><th>Estado</th></tr></thead><tbody>`;
   ings.forEach(ing=>{
     const k=ing.key;const m=STATE.map[k]||{};
     const cur=currentProdFor(ing.name);
     const sel=m.prod||(cur?cur.n:'');
-    const cpu=ingCostPerUnit(ing.name);
-    const mapped=cpu!=null;
+    const base=rawCostPerUnit(ing.name);
+    const eff=ingCostPerUnit(ing.name);
+    const mapped=eff!=null;
     h+=`<tr data-name="${norm(ing.name)}">
       <td><b>${ing.name}</b></td>
       <td><select class="map" onchange="setMap('${k.replace(/'/g,"\\'")}','prod',this.value)">
         <option value=""${sel?'':' selected'}>— sin vincular —</option>${optsFor(sel)}</select></td>
-      <td class="num"><input class="cost" value="${m.costPerUnit!=null&&m.costPerUnit!==""?m.costPerUnit:(cpu!=null?cpu.toFixed(2):'')}" onchange="setMap('${k.replace(/'/g,"\\'")}','costPerUnit',this.value)"></td>
+      <td class="num"><input class="cost" style="width:80px" value="${m.costPerUnit!=null&&m.costPerUnit!==""?m.costPerUnit:(base!=null?base.toFixed(2):'')}" onchange="setMap('${k.replace(/'/g,"\\'")}','costPerUnit',this.value)"></td>
+      <td class="num"><input class="cost" style="width:60px" value="${m.merma!=null&&m.merma!==""?m.merma:''}" placeholder="0" onchange="setMap('${k.replace(/'/g,"\\'")}','merma',this.value)"></td>
+      <td class="num">${eff!=null?fmt2(eff):'—'}</td>
       <td>${CONFIRMADOS[k]!=null?'<span class="pill ok">✓ confirmado</span>':(mapped?'<span class="pill ok">vinculado</span>':'<span class="pill warn">pendiente</span>')}</td>
     </tr>`;
   });
@@ -1178,19 +1199,27 @@ function filterIns(q){q=norm(q);document.querySelectorAll('#insTable tbody tr').
 
 /* ---- COSTOS FIJOS ---- */
 function renderFijos(){
-  const actual=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
-  const futuro=COSTOS_FIJOS.reduce((a,c)=>a+c[1],0);
+  const actual=fixedActual();
+  const futuro=fixedTotal();
   let h=`<div class="kpis">
-    <div class="kpi"><div class="v">${fmt(actual)}</div><div class="l">Costo fijo mensual actual</div></div>
-    <div class="kpi"><div class="v">${fmt(futuro)}</div><div class="l">Mensual desde agosto</div></div>
+    <div class="kpi"><div class="v">${fmt(actual)}</div><div class="l">Costo fijo mensual (activos)</div></div>
+    <div class="kpi"><div class="v">${fmt(futuro)}</div><div class="l">Total incluyendo inactivos</div></div>
   </div>
-  <div class="card"><h2>Costos fijos y variables de operación</h2>
-  <div class="hint">El método de precio usado es <b>food cost %</b>: estos costos fijos se cubren a través del margen (precio = costo insumos ÷ food cost %). Esta tabla es de referencia. Para validar tu food cost % objetivo: costos fijos ÷ ventas mensuales estimadas = % de ventas que se va en operación.</div>
-  <table><thead><tr><th>Concepto</th><th class="num">Valor mensual</th><th>Vigencia</th></tr></thead><tbody>`;
-  COSTOS_FIJOS.forEach(c=>{h+=`<tr><td>${c[0]}</td><td class="num">${fmt(c[1])}</td><td>${c[2]?'Actual':'Desde agosto'}</td></tr>`;});
-  h+=`<tr style="font-weight:700"><td>TOTAL ACTUAL</td><td class="num">${fmt(actual)}</td><td></td></tr>
-  <tr style="font-weight:700"><td>TOTAL DESDE AGOSTO</td><td class="num">${fmt(futuro)}</td><td></td></tr>
+  <div class="card"><h2>Costos fijos y variables de operación · editable</h2>
+  <div class="hint">Actualiza estos valores cada mes. Edita el <b>nombre</b> o el <b>valor</b>, desmarca <b>¿Cuenta ahora?</b> para excluir un rubro del total actual (ej. algo que empieza más adelante), o agrega/elimina conceptos. El total afecta el punto de equilibrio y la rentabilidad neta.</div>
+  <table><thead><tr><th>Concepto</th><th class="num">Valor mensual</th><th style="text-align:center">¿Cuenta ahora?</th><th></th></tr></thead><tbody>`;
+  fixedList().forEach((c,i)=>{
+    h+=`<tr>
+      <td><input value="${(c.name||'').replace(/"/g,'&quot;')}" style="width:100%;max-width:320px" onchange="setFixed(${i},'name',this.value)"></td>
+      <td class="num"><input class="cost" value="${c.value}" onchange="setFixed(${i},'value',this.value)"></td>
+      <td style="text-align:center"><input type="checkbox" ${c.active?'checked':''} onchange="toggleFixed(${i},this.checked)"></td>
+      <td><button class="btn ghost" style="padding:3px 9px" onclick="delFixed(${i})">✕</button></td>
+    </tr>`;
+  });
+  h+=`<tr style="font-weight:700"><td>TOTAL MENSUAL (activos)</td><td class="num">${fmt(actual)}</td><td colspan="2"></td></tr>
+  <tr style="color:var(--muted)"><td>Total incluyendo inactivos</td><td class="num">${fmt(futuro)}</td><td colspan="2"></td></tr>
   </tbody></table>
+  <button class="btn" style="margin-top:10px" onclick="addFixed()">➕ Agregar costo fijo</button>
   <div class="card" style="margin-top:16px;background:var(--panel2)">
     <h2 style="font-size:15px">Calculadora de punto de equilibrio</h2>
     <div class="controls">
@@ -1202,8 +1231,12 @@ function renderFijos(){
   </div>`;
   document.getElementById('tab-fijos').innerHTML=h;calcBe();
 }
+function setFixed(i,field,val){const c=fixedList()[i];if(!c)return;c[field]=field==='value'?(parseFloat(val)||0):val;save();renderFijos();}
+function toggleFixed(i,checked){const c=fixedList()[i];if(!c)return;c.active=checked;save();renderFijos();}
+function addFixed(){STATE.fixedCosts.push({name:'Nuevo costo',value:0,active:true});save();renderFijos();}
+function delFixed(i){if(!confirm('¿Eliminar este costo fijo?'))return;STATE.fixedCosts.splice(i,1);save();renderFijos();}
 function calcBe(){
-  const actual=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
+  const actual=fixedActual();
   const ticket=parseFloat(document.getElementById('ticket').value)||0;
   const fc=(parseFloat(document.getElementById('beFc').value)||30)/100;
   const margenContrib=ticket*(1-fc); // ticket menos costo de insumos
@@ -1232,7 +1265,7 @@ function exportRentabilidad(){
   let csv=`Plato,Seccion,Precio neto,Precio publico (+${STATE.incPct}% INC),Costo insumos,Margen contribucion $,Margen contribucion %\n`;
   allPlatos().forEach(p=>{const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),mc=price-cpp,mcp=price>0?(mc/price*100):0;
     csv+=`"${p[0]}","${p[1]}",${price},${precioPublico(price)},${Math.round(cpp)},${Math.round(mc)},${mcp.toFixed(0)}%\n`;});
-  const actual=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
+  const actual=fixedActual();
   const avgMC=allPlatos().reduce((a,p)=>a+(roundPrice(suggestedPrice(p))-dishCostPerPortion(p)),0)/allPlatos().length;
   csv+=`\n"PROYECCION MENSUAL",,,,,\n`;
   csv+=`"Margen contribucion promedio/plato",,,,${Math.round(avgMC)},\n`;
@@ -1244,7 +1277,7 @@ function exportRentabilidad(){
 }
 function printReport(){
   const hoy=new Date().toLocaleDateString('es-CO',{year:'numeric',month:'long',day:'numeric'});
-  const actual=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
+  const actual=fixedActual();
   const vol=STATE.volumenMes, fijoPorPlato=vol>0?actual/vol:0;
   let rows="",sect="",tCosto=0,tPrecio=0,tMC=0,tNeta=0;
   const fcs=[];
@@ -1321,7 +1354,7 @@ function printReport(){
 function generateInforme(){
   const hoy=new Date().toLocaleDateString('es-CO',{year:'numeric',month:'long',day:'numeric'});
   const inc=STATE.incPct, vol=STATE.volumenMes;
-  const actual=COSTOS_FIJOS.filter(c=>c[2]).reduce((a,c)=>a+c[1],0);
+  const actual=fixedActual();
   const fpp=vol>0?actual/vol:0;
   const ds=allPlatos().map(p=>{const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p),mc=price-cpp,mcp=price>0?mc/price*100:0,neta=mc-fpp,rent=price>0?neta/price*100:0;return{n:p[0],sec:p[1],cpp,price,pub:precioPublico(price),fc,mc,mcp,neta,rent};});
   const n=ds.length, avg=f=>ds.reduce((a,d)=>a+f(d),0)/n;
