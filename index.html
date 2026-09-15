@@ -91,9 +91,12 @@ details summary{cursor:pointer;color:var(--accent);font-size:13px;margin:8px 0}
   <div class="tab" id="tab-rentabilidad"></div>
   <div class="tab" id="tab-platos"></div>
   <div class="tab" id="tab-subrecetas"></div>
+  <div class="tab" id="tab-bebidas"></div>
   <div class="tab" id="tab-vinculacion"></div>
   <div class="tab" id="tab-insumos"></div>
   <div class="tab" id="tab-fijos"></div>
+  <div class="tab" id="tab-inventario"></div>
+  <div class="tab" id="tab-movimientos"></div>
 </main>
 <div class="foot">Piso Cuatro · Sistema de costeo · En modo nube los cambios se guardan para todos; en modo local, solo en este navegador.</div>
 
@@ -587,6 +590,10 @@ function ensureDefaults(){
   STATE.subYield = STATE.subYield || {};           // sub -> rendimiento editado
   STATE.hiddenPlatos = STATE.hiddenPlatos || {};   // plato base -> true (ocultado)
   STATE.fixedCosts = STATE.fixedCosts || COSTOS_FIJOS.map(c=>({name:c[0],value:c[1],active:c[2]})); // costos fijos editables
+  STATE.bebidas = STATE.bebidas || [];             // bebidas embotelladas (reventa): [{n,costo,precio}]
+  STATE.stock = STATE.stock || {};                 // inventario: id -> {qty,min}
+  STATE.movs = STATE.movs || [];                   // movimientos (kardex): [{id,ts,itemId,itemName,unit,tipo,qty,motivo,valor}]
+  STATE.posMap = STATE.posMap || {};               // nombre POS (norm) -> {tipo:'plato'|'bebida', name}
 }
 function fixedList(){return STATE.fixedCosts||[];}
 function fixedActual(){return fixedList().filter(c=>c.active).reduce((a,c)=>a+(parseFloat(c.value)||0),0);}
@@ -827,14 +834,74 @@ function suggestedPrice(p){const fc=dishFoodCost(p)/100;return fc>0?dishCostPerP
 function roundPrice(v){return Math.round(v/100)*100;}
 function precioPublico(neto){return roundPrice(neto*(1+(STATE.incPct||0)/100));}
 
+/* ============ INVENTARIO ============ */
+function uid(){return 'm'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
+// items de inventario: ingredientes (g/ml/ud) + bebidas embotelladas (ud)
+function invIngredients(){return uniqueIngredients().map(i=>({id:'ing:'+i.key,key:i.key,name:i.name,unit:ingUnitOf(i.name),tipo:'ing'}));}
+function invBebidas(){return (STATE.bebidas||[]).map(b=>({id:'beb:'+norm(b.n),key:norm(b.n),name:b.n,unit:'ud',tipo:'beb',costo:+b.costo||0}));}
+function allInvItems(){return invIngredients().concat(invBebidas());}
+function invItemById(id){return allInvItems().find(x=>x.id===id);}
+function stockOf(id){return (STATE.stock[id]&&+STATE.stock[id].qty)||0;}
+function minOf(id){return (STATE.stock[id]&&+STATE.stock[id].min)||0;}
+function unitCostForInv(it){return it.tipo==='beb'?(+it.costo||0):(rawCostPerUnit(it.name)||0);}
+function itemUnitById(id){const it=invItemById(id);return it?it.unit:'';}
+// peso total (g/ml) de una sub-receta, para prorratear consumo
+function subTotalWeight(s){let w=0;for(const [ing,qty,unit] of s[2]){const k=norm(ing);if(isSub(k)){w+=qty;}else if(unit!=='ud'){w+=qty;}}return w;}
+// explota los items de una receta a ingredientes crudos {key:{name,qty,unit}}
+function explodeItems(items,factor,acc){
+  for(const [ing,qty,unit] of items){
+    const k=norm(ing);
+    if(isSub(k)){const s=subByNorm(k);const tw=subTotalWeight(s);if(tw>0)explodeItems(s[2],factor*(qty/tw),acc);}
+    else{acc[k]=acc[k]||{name:ing,qty:0,unit:unit};acc[k].qty+=qty*factor;}
+  }
+}
+function explodeDish(p){const acc={};explodeItems(dishItems(p),1,acc);return acc;}
+// registra un movimiento y ajusta stock. delta negativo = salida
+function applyMov(id,itemName,unit,delta,tipo,motivo,valor){
+  STATE.stock[id]=STATE.stock[id]||{qty:0,min:0};
+  STATE.stock[id].qty=(+STATE.stock[id].qty||0)+delta;
+  STATE.movs.push({id:uid(),ts:Date.now(),itemId:id,itemName:itemName,unit:unit,tipo:tipo,qty:delta,motivo:motivo||'',valor:(valor==null?null:+valor)});
+}
+// vender N porciones de un plato: descuenta ingredientes; devuelve nº de líneas afectadas
+function sellDish(dishName,n,fecha){
+  const p=allPlatos().find(x=>norm(x[0])===norm(dishName));if(!p)return 0;
+  const ex=explodeDish(p);let c=0;
+  for(const k in ex){const it=invIngredients().find(x=>x.key===k)||{id:'ing:'+k,name:ex[k].name,unit:ex[k].unit};
+    applyMov(it.id,ex[k].name,ex[k].unit||it.unit,-ex[k].qty*n,'venta','Venta '+n+'× '+p[0]);c++;}
+  return c;
+}
+function sellBebida(bebName,n){
+  const it=invBebidas().find(x=>norm(x.name)===norm(bebName));if(!it)return false;
+  applyMov(it.id,it.name,'ud',-n,'venta','Venta '+n+'× '+it.name);return true;
+}
+// empareja un nombre del POS con un plato o bebida (usa memoria posMap)
+function matchPOS(posName){
+  const raw=posName.trim(); const key=norm(raw);
+  if(STATE.posMap[key])return STATE.posMap[key];               // ya mapeado
+  // el POS suele venir "CATEGORIA - NOMBRE"; probar nombre completo y la parte tras " - "
+  const cands=[raw]; const dash=raw.split(/\s-\s/); if(dash.length>1)cands.push(dash.slice(1).join(' - '));
+  for(const c of cands){const nc=norm(c);
+    let p=allPlatos().find(x=>norm(x[0])===nc); if(p)return {tipo:'plato',name:p[0]};
+    let b=invBebidas().find(x=>norm(x.name)===nc); if(b)return {tipo:'bebida',name:b.name};
+  }
+  // coincidencia parcial (contiene)
+  for(const c of cands){const nc=norm(c);
+    let p=allPlatos().find(x=>nc.includes(norm(x[0]))||norm(x[0]).includes(nc)); if(p)return {tipo:'plato',name:p[0]};
+    let b=invBebidas().find(x=>nc.includes(norm(x.name))||norm(x.name).includes(nc)); if(b)return {tipo:'bebida',name:b.name};
+  }
+  return null;
+}
+function valorInventario(){let v=0;allInvItems().forEach(it=>{v+=stockOf(it.id)*unitCostForInv(it);});return v;}
+
 /* ============ UTILIDADES UI ============ */
 function secciones(){const o=[];allPlatos().forEach(p=>{if(!o.includes(p[1]))o.push(p[1]);});return o;}
 function setSectionFC(s,v){if(v===''||v==null)delete STATE.sectionFoodCost[s];else STATE.sectionFoodCost[s]=parseFloat(v);save();showTab('resumen');}
 const fmt=v=>v==null||isNaN(v)?'—':'$'+Math.round(v).toLocaleString('es-CO');
 const fmt2=v=>v==null||isNaN(v)?'—':'$'+v.toLocaleString('es-CO',{maximumFractionDigits:2});
+const fmtN=v=>v==null||isNaN(v)?'0':(+v).toLocaleString('es-CO',{maximumFractionDigits:2});
 
 /* ============ TABS ============ */
-const TABS=[["resumen","📋 Resumen / Carta"],["rentabilidad","📈 Rentabilidad"],["platos","🍽 Platos"],["subrecetas","🥣 Sub-recetas"],["vinculacion","🔗 Vinculación insumos"],["insumos","💲 Precios insumos"],["fijos","🏠 Costos fijos"]];
+const TABS=[["resumen","📋 Resumen / Carta"],["rentabilidad","📈 Rentabilidad"],["platos","🍽 Platos"],["subrecetas","🥣 Sub-recetas"],["bebidas","🥤 Bebidas embotelladas"],["inventario","📦 Inventario"],["movimientos","🔄 Movimientos"],["vinculacion","🔗 Vinculación insumos"],["insumos","💲 Precios insumos"],["fijos","🏠 Costos fijos"]];
 function buildNav(){
   const nav=document.getElementById('nav');
   nav.innerHTML=TABS.map(t=>`<button data-t="${t[0]}" onclick="showTab('${t[0]}')">${t[1]}</button>`).join('');
@@ -844,7 +911,7 @@ function showTab(t){
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.t===t));
   document.getElementById('tab-'+t).classList.add('active');
-  ({resumen:renderResumen,rentabilidad:renderRentabilidad,platos:renderPlatos,subrecetas:renderSub,vinculacion:renderVinc,insumos:renderInsumos,fijos:renderFijos}[t])();
+  ({resumen:renderResumen,rentabilidad:renderRentabilidad,platos:renderPlatos,subrecetas:renderSub,bebidas:renderBebidas,inventario:renderInventario,movimientos:renderMovs,vinculacion:renderVinc,insumos:renderInsumos,fijos:renderFijos}[t])();
 }
 
 /* ---- RESUMEN ---- */
@@ -1101,6 +1168,231 @@ function delSub(sn){
   if(!confirm('¿Eliminar la sub-receta "'+sn+'"? Si algún plato la usa, ese ingrediente quedará sin costo.'))return;
   STATE.customSubs=STATE.customSubs.filter(x=>x.n!==sn);delete STATE.subItems[sn];delete STATE.subYield[sn];
   save();clearCache();renderSub();
+}
+
+/* ---- BEBIDAS EMBOTELLADAS (reventa) ---- */
+function renderBebidas(){
+  const inc=STATE.incPct;
+  let h=`<div class="card"><h2>Bebidas embotelladas (reventa)</h2>
+  <div class="hint">Para bebidas que se compran y se revenden sin preparación (gaseosas, cervezas, aguas, vinos, licores). Ingresa el <b>costo de compra</b> y el <b>precio de venta</b>; el sistema calcula el margen y el precio al público con ${inc}% de INC.
+  <br><b>¿Bebidas con receta</b> (jugos, cócteles, calientes)? Créalas en la pestaña 🍽 Platos con la categoría "Bebidas Frías" o "Bebidas Calientes" — usan recetas y sub-recetas como cualquier plato.</div>
+  <div class="controls" style="background:var(--panel2)">
+    <b style="color:var(--accent)">➕ Nueva bebida:</b>
+    <input id="nbName" placeholder="Nombre (ej. Coca-Cola 400ml)" style="width:220px">
+    <input id="nbCosto" type="number" placeholder="Costo compra" style="width:110px">
+    <input id="nbPrecio" type="number" placeholder="Precio venta" style="width:110px">
+    <button class="btn" onclick="addBebida()">Agregar</button>
+  </div></div>`;
+  const list=STATE.bebidas||[];
+  if(!list.length){h+=`<div class="card"><div class="hint">Aún no hay bebidas embotelladas. Agrega la primera con el formulario de arriba.</div></div>`;}
+  else{
+    let tCosto=0,tPrecio=0;
+    h+=`<div class="card"><div class="scroll"><table><thead><tr><th>Bebida</th><th class="num">Costo compra</th><th class="num">Precio venta</th><th class="num">Precio público (+${inc}%)</th><th class="num">Margen $</th><th class="num">Margen %</th><th></th></tr></thead><tbody>`;
+    list.forEach((b,i)=>{
+      const costo=+b.costo||0, precio=+b.precio||0, mg=precio-costo, mgp=precio>0?mg/precio*100:0;
+      tCosto+=costo;tPrecio+=precio;
+      const col=mgp>=50?'var(--green)':(mgp>=30?'var(--accent2)':'var(--red)');
+      h+=`<tr>
+        <td><input value="${(b.n||'').replace(/"/g,'&quot;')}" style="width:100%;max-width:260px" onchange="setBebida(${i},'n',this.value)"></td>
+        <td class="num"><input class="cost" value="${costo}" onchange="setBebida(${i},'costo',this.value)"></td>
+        <td class="num"><input class="cost" value="${precio}" onchange="setBebida(${i},'precio',this.value)"></td>
+        <td class="num price">${fmt(precioPublico(precio))}</td>
+        <td class="num">${fmt(mg)}</td>
+        <td class="num" style="color:${col};font-weight:700">${mgp.toFixed(0)}%</td>
+        <td><button class="btn ghost" style="padding:3px 9px" onclick="delBebida(${i})">✕</button></td>
+      </tr>`;
+    });
+    const mgt=tPrecio-tCosto;
+    h+=`<tr style="font-weight:700"><td>TOTAL (${list.length})</td><td class="num">${fmt(tCosto)}</td><td class="num">${fmt(tPrecio)}</td><td></td><td class="num">${fmt(mgt)}</td><td class="num">${tPrecio>0?(mgt/tPrecio*100).toFixed(0):0}%</td><td></td></tr>`;
+    h+=`</tbody></table></div>
+    <div style="margin-top:10px"><button class="btn ghost" onclick="exportBebidas()">⬇ Exportar a Excel (CSV)</button></div></div>`;
+  }
+  document.getElementById('tab-bebidas').innerHTML=h;
+}
+function addBebida(){
+  const n=(document.getElementById('nbName').value||'').trim();
+  const costo=parseFloat(document.getElementById('nbCosto').value);
+  const precio=parseFloat(document.getElementById('nbPrecio').value);
+  if(!n){alert('Escribe el nombre de la bebida.');return;}
+  STATE.bebidas.push({n:n,costo:isNaN(costo)?0:costo,precio:isNaN(precio)?0:precio});
+  save();renderBebidas();
+}
+function setBebida(i,field,val){const b=STATE.bebidas[i];if(!b)return;b[field]=(field==='n')?val:(parseFloat(val)||0);save();renderBebidas();}
+function delBebida(i){if(!confirm('¿Eliminar esta bebida?'))return;STATE.bebidas.splice(i,1);save();renderBebidas();}
+function exportBebidas(){
+  let csv=`Bebida,Costo compra,Precio venta,Precio publico (+${STATE.incPct}% INC),Margen $,Margen %\n`;
+  (STATE.bebidas||[]).forEach(b=>{const costo=+b.costo||0,precio=+b.precio||0,mg=precio-costo,mgp=precio>0?mg/precio*100:0;
+    csv+=`"${(b.n||'').replace(/"/g,'""')}",${costo},${precio},${precioPublico(precio)},${mg},${mgp.toFixed(0)}%\n`;});
+  const blob=new Blob(['﻿'+csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='bebidas_embotelladas_piso4.csv';a.click();
+}
+
+/* ---- INVENTARIO ---- */
+function renderInventario(){
+  const items=allInvItems();
+  const bajo=items.filter(it=>{const m=minOf(it.id);return m>0 && stockOf(it.id)<m;});
+  let h=`<div class="kpis">
+    <div class="kpi"><div class="v">${fmt(valorInventario())}</div><div class="l">Valor del inventario</div></div>
+    <div class="kpi"><div class="v">${items.length}</div><div class="l">Ítems controlados</div></div>
+    <div class="kpi"><div class="v" style="color:${bajo.length?'var(--red)':'var(--green)'}">${bajo.length}</div><div class="l">Bajo mínimo</div></div>
+  </div>`;
+  if(bajo.length){
+    h+=`<div class="card" style="border-color:var(--red)"><h2 style="font-size:15px;color:var(--red)">⚠ Alertas de stock</h2><ul>`+
+      bajo.map(it=>`<li><b>${it.name}</b>: ${fmtN(stockOf(it.id))} ${it.unit} <span style="color:var(--muted)">(mínimo ${fmtN(minOf(it.id))})</span></li>`).join('')+`</ul></div>`;
+  }
+  h+=`<div class="card"><h2>Inventario actual</h2>
+  <div class="hint">Stock en la unidad de la receta (g/ml/ud) y las bebidas en unidades. Edita el <b>stock</b> (queda registrado como ajuste en el kardex) y el <b>mínimo</b> para las alertas. El valor usa el costo de compra base. Registra compras y ventas en la pestaña 🔄 Movimientos.</div>
+  <input class="search" placeholder="Buscar ítem..." oninput="filterInv(this.value)">
+  <div class="scroll"><table id="invTable"><thead><tr><th>Ítem</th><th>Tipo</th><th>Und</th><th class="num">Stock</th><th class="num">Mínimo</th><th class="num">Costo/u</th><th class="num">Valor</th></tr></thead><tbody>`;
+  items.forEach(it=>{
+    const q=stockOf(it.id),m=minOf(it.id),cu=unitCostForInv(it),val=q*cu, low=m>0&&q<m;
+    h+=`<tr data-name="${norm(it.name)}"${low?' style="background:rgba(224,102,102,.10)"':''}>
+      <td>${it.name}</td><td>${it.tipo==='beb'?'Bebida':'Insumo'}</td><td>${it.unit}</td>
+      <td class="num"><input class="cost" value="${q}" onchange="setInvQty('${it.id}',this.value)"></td>
+      <td class="num"><input class="cost" style="width:70px" value="${m||''}" placeholder="0" onchange="setInvMin('${it.id}',this.value)"></td>
+      <td class="num">${fmt2(cu)}</td><td class="num">${fmt(val)}</td></tr>`;
+  });
+  h+=`</tbody></table></div></div>`;
+  document.getElementById('tab-inventario').innerHTML=h;
+}
+function filterInv(q){q=norm(q);document.querySelectorAll('#invTable tbody tr').forEach(tr=>{tr.style.display=tr.dataset.name.includes(q)?'':'none';});}
+function setInvQty(id,val){const nv=parseFloat(val)||0,old=stockOf(id),it=invItemById(id)||{name:id,unit:''};applyMov(id,it.name,it.unit,nv-old,'ajuste','Ajuste manual');save();renderInventario();}
+function setInvMin(id,val){STATE.stock[id]=STATE.stock[id]||{qty:0,min:0};STATE.stock[id].min=parseFloat(val)||0;save();renderInventario();}
+function findInvItemByName(name){const nn=norm(name);return allInvItems().find(x=>norm(x.name)===nn);}
+
+/* ---- MOVIMIENTOS / KARDEX ---- */
+let BULK=[];
+function renderMovs(){
+  const itemsOpts=allInvItems().map(it=>`<option value="${it.name.replace(/"/g,'&quot;')}">`).join('');
+  const ventaOpts=allPlatos().map(p=>`<option value="${p[0].replace(/"/g,'&quot;')}">`).join('')+invBebidas().map(b=>`<option value="${b.name.replace(/"/g,'&quot;')}">`).join('');
+  let h=`<div class="card"><h2>Movimientos de inventario</h2><div class="hint">Registra entradas (compras), salidas, bajas (merma/daño) y ventas. Las <b>ventas descuentan los ingredientes según la receta</b> (y las sub-recetas). Todo queda en el kardex.</div></div>
+  <div class="card"><h2 style="font-size:15px">📥 Entrada / Compra</h2><div class="controls">
+    <input id="eItem" list="invItemsDL" placeholder="Ítem (insumo o bebida)" style="width:230px">
+    <input id="eQty" type="number" placeholder="Cantidad" style="width:110px">
+    <input id="eVal" type="number" placeholder="Costo total (opc.)" style="width:150px">
+    <input id="eNota" placeholder="Nota (proveedor/factura)" style="width:200px">
+    <button class="btn" onclick="regEntrada()">Registrar entrada</button></div></div>
+  <div class="card"><h2 style="font-size:15px">📤 Salida / Baja</h2><div class="controls">
+    <input id="sItem" list="invItemsDL" placeholder="Ítem" style="width:230px">
+    <input id="sQty" type="number" placeholder="Cantidad" style="width:110px">
+    <select id="sTipo"><option value="salida">Salida</option><option value="baja">Baja (merma/daño)</option></select>
+    <input id="sNota" placeholder="Motivo" style="width:200px">
+    <button class="btn" onclick="regSalida()">Registrar</button></div></div>
+  <div class="card"><h2 style="font-size:15px">🧾 Venta (descuenta receta)</h2><div class="controls">
+    <input id="vItem" list="ventaDL" placeholder="Plato o bebida" style="width:280px">
+    <input id="vQty" type="number" value="1" style="width:90px">
+    <button class="btn" onclick="regVentaManual()">Registrar venta</button></div></div>
+  <div class="card"><h2 style="font-size:15px">📋 Carga masiva de ventas (reporte Pirpos)</h2>
+    <div class="hint">Importa el archivo de ventas descargado de <b>Pirpos</b> (Excel .xlsx o CSV). Detecto las columnas <b>Producto</b> y <b>Cantidad</b> automáticamente, emparejo con tus platos/bebidas (los nombres nuevos los confirmas una vez y quedan recordados) y descuento el inventario. Solo descuenta lo que existe en Piso Cuatro; lo demás se ignora.</div>
+    <div class="controls">
+      <label class="btn">📁 Importar archivo (.xlsx / .csv)<input type="file" id="bulkFile" accept=".xlsx,.xls,.csv,.txt" style="display:none" onchange="importBulkFile(this)"></label>
+      <span style="color:var(--muted)">o pega las filas abajo</span>
+    </div>
+    <textarea id="bulkTxt" style="width:100%;height:90px;background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:8px" placeholder="Producto	Cantidad  (o pega directo del Excel)"></textarea>
+    <div style="margin-top:8px"><button class="btn" onclick="procesarBulk()">Procesar texto pegado</button></div>
+    <div id="bulkPreview"></div></div>`;
+  const movs=[...STATE.movs].sort((a,b)=>b.ts-a.ts).slice(0,200);
+  h+=`<div class="card"><h2 style="font-size:15px">📜 Kardex (últimos ${movs.length} movimientos)</h2>
+    <div class="controls" style="background:none;padding:0"><input class="search" style="margin:0" placeholder="Filtrar por ítem..." oninput="filterKardex(this.value)"><button class="btn ghost" onclick="exportKardex()">⬇ Exportar CSV</button></div>
+    <div class="scroll"><table id="kardexTable"><thead><tr><th>Fecha</th><th>Ítem</th><th>Tipo</th><th class="num">Cantidad</th><th>Motivo</th></tr></thead><tbody>`;
+  movs.forEach(m=>{const d=new Date(m.ts);const col=m.qty>=0?'var(--green)':'var(--red)';
+    h+=`<tr data-name="${norm(m.itemName)}"><td>${d.toLocaleDateString('es-CO')} ${d.toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'})}</td><td>${m.itemName}</td><td>${m.tipo}</td><td class="num" style="color:${col}">${m.qty>=0?'+':''}${fmtN(m.qty)} ${m.unit||''}</td><td>${m.motivo||''}</td></tr>`;});
+  h+=`</tbody></table></div></div>
+  <datalist id="invItemsDL">${itemsOpts}</datalist><datalist id="ventaDL">${ventaOpts}</datalist>`;
+  document.getElementById('tab-movimientos').innerHTML=h;
+}
+function filterKardex(q){q=norm(q);document.querySelectorAll('#kardexTable tbody tr').forEach(tr=>{tr.style.display=tr.dataset.name.includes(q)?'':'none';});}
+function regEntrada(){
+  const it=findInvItemByName(document.getElementById('eItem').value); if(!it){alert('Ítem no encontrado. Escríbelo igual que en la lista.');return;}
+  const q=parseFloat(document.getElementById('eQty').value); if(!q||q<=0){alert('Cantidad inválida.');return;}
+  applyMov(it.id,it.name,it.unit,q,'entrada',document.getElementById('eNota').value||'Compra',document.getElementById('eVal').value);
+  save();renderMovs();
+}
+function regSalida(){
+  const it=findInvItemByName(document.getElementById('sItem').value); if(!it){alert('Ítem no encontrado.');return;}
+  const q=parseFloat(document.getElementById('sQty').value); if(!q||q<=0){alert('Cantidad inválida.');return;}
+  const tipo=document.getElementById('sTipo').value;
+  applyMov(it.id,it.name,it.unit,-Math.abs(q),tipo,document.getElementById('sNota').value||tipo);
+  save();renderMovs();
+}
+function regVentaManual(){
+  const name=document.getElementById('vItem').value.trim(); const q=parseFloat(document.getElementById('vQty').value)||1;
+  if(!name){alert('Escribe el plato o bebida.');return;}
+  let ok=sellDish(name,q); if(!ok)ok=sellBebida(name,q)?1:0;
+  if(!ok){alert('No encontré ese plato ni bebida: '+name);return;}
+  save();renderMovs();
+}
+function importBulkFile(input){
+  const f=input.files&&input.files[0]; if(!f)return;
+  const name=f.name.toLowerCase();
+  if(name.endsWith('.xlsx')||name.endsWith('.xls')){
+    loadXLSX(function(){
+      const rd=new FileReader();
+      rd.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});const ws=wb.Sheets[wb.SheetNames[0]];const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});procesarRows(rows);}catch(err){alert('No pude leer el Excel: '+err.message+'\\nPrueba guardándolo como CSV.');}};
+      rd.readAsArrayBuffer(f);
+    });
+  } else {
+    const rd=new FileReader(); rd.onload=e=>procesarTexto(e.target.result); rd.readAsText(f,'utf-8');
+  }
+  input.value='';
+}
+function loadXLSX(cb){
+  if(window.XLSX)return cb();
+  const s=document.createElement('script');
+  s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  s.onload=cb; s.onerror=()=>alert('No se pudo cargar el lector de Excel (revisa tu conexión) o guarda el archivo como CSV.');
+  document.head.appendChild(s);
+}
+function procesarBulk(){const t=document.getElementById('bulkTxt').value;if(!t.trim()){alert('Pega las filas o importa un archivo.');return;}procesarTexto(t);}
+function procesarTexto(txt){
+  txt=String(txt).replace(/\r/g,''); const lines=txt.split('\n').filter(l=>l.trim());
+  if(!lines.length){alert('Archivo/texto vacío.');return;}
+  let delim='\t'; const h=lines[0];
+  if(h.indexOf('\t')<0){ delim=(h.split(';').length>=h.split(',').length)?';':','; }
+  procesarRows(lines.map(l=>l.split(delim)));
+}
+function procesarRows(rows){
+  if(!rows||!rows.length){alert('Sin datos en el archivo.');return;}
+  let pi=-1,ci=-1,start=0;
+  const hdr=(rows[0]||[]).map(s=>norm(String(s)));
+  pi=hdr.findIndex(s=>s.includes('producto')); ci=hdr.findIndex(s=>s.includes('cantidad'));
+  if(pi>=0){start=1;} else {pi=3;ci=4;}   // sin encabezado: posiciones estándar del reporte Pirpos
+  if(ci<0)ci=pi+1;
+  const agg={};
+  for(let i=start;i<rows.length;i++){const cols=rows[i]||[];const prod=String(cols[pi]==null?'':cols[pi]).trim();if(!prod)continue;const cant=parseFloat(String(cols[ci]==null?'1':cols[ci]).replace(/\./g,'').replace(',','.'))||1;agg[prod]=(agg[prod]||0)+cant;}
+  BULK=Object.keys(agg).map(prod=>({prod,cant:agg[prod],match:matchPOS(prod),manual:''}));
+  if(!BULK.length){alert('No encontré filas con Producto. Revisa que el archivo tenga la columna "Producto".');return;}
+  renderBulkPreview();
+}
+function renderBulkPreview(){
+  if(!BULK.length){document.getElementById('bulkPreview').innerHTML='<div class="hint">No se detectaron filas.</div>';return;}
+  const opts=allPlatos().map(p=>`plato|${p[0]}`).concat(invBebidas().map(b=>`bebida|${b.name}`));
+  const sinMap=BULK.filter(r=>!r.match&&!r.manual).length;
+  let h=`<table style="margin-top:10px"><thead><tr><th>Producto (POS)</th><th class="num">Cant.</th><th>Se descuenta como</th></tr></thead><tbody>`;
+  BULK.forEach((r,i)=>{
+    let cell;
+    if(r.match){cell=`<span class="pill ok">✓ ${r.match.tipo}: ${r.match.name}</span>`;}
+    else{cell=`<select onchange="setBulkMap(${i},this.value)"><option value="">— elige a qué corresponde —</option>${opts.map(o=>{const[t,n]=o.split('|');return `<option value="${o.replace(/"/g,'&quot;')}"${r.manual===o?' selected':''}>${t==='plato'?'🍽':'🥤'} ${n}</option>`}).join('')}</select>`;}
+    h+=`<tr><td>${r.prod}</td><td class="num">${fmtN(r.cant)}</td><td>${cell}</td></tr>`;
+  });
+  h+=`</tbody></table><div style="margin-top:10px">${sinMap?`<span style="color:var(--red)">${sinMap} producto(s) sin emparejar — se ignorarán si no los asignas.</span> `:''}<button class="btn" onclick="aplicarBulk()">✅ Aplicar ventas al inventario</button></div>`;
+  document.getElementById('bulkPreview').innerHTML=h;
+}
+function setBulkMap(i,val){BULK[i].manual=val;if(val){const[t,n]=val.split('|');STATE.posMap[norm(BULK[i].prod)]={tipo:t,name:n};}}
+function aplicarBulk(){
+  let okc=0,ign=0;
+  BULK.forEach(r=>{const tgt=r.match||(r.manual?(function(){const[t,n]=r.manual.split('|');return {tipo:t,name:n};})():null);
+    if(!tgt){ign++;return;}
+    if(tgt.tipo==='plato')sellDish(tgt.name,r.cant); else sellBebida(tgt.name,r.cant);
+    STATE.posMap[norm(r.prod)]=tgt; okc++;});
+  save();BULK=[];
+  alert('Ventas aplicadas: '+okc+' producto(s). '+(ign?ign+' ignorado(s) sin emparejar.':''));
+  renderMovs();
+}
+function exportKardex(){
+  let csv='Fecha,Item,Tipo,Cantidad,Unidad,Motivo,Valor\n';
+  [...STATE.movs].sort((a,b)=>b.ts-a.ts).forEach(m=>{const d=new Date(m.ts).toLocaleString('es-CO');
+    csv+=`"${d}","${(m.itemName||'').replace(/"/g,'""')}","${m.tipo}",${m.qty},"${m.unit||''}","${(m.motivo||'').replace(/"/g,'""')}",${m.valor==null?'':m.valor}\n`;});
+  const blob=new Blob(['﻿'+csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='kardex_piso4.csv';a.click();
 }
 
 /* ---- VINCULACIÓN ---- */
