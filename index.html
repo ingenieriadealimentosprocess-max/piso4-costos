@@ -544,7 +544,7 @@ async function cloudPull(){
     const r=await fetch(`${CLOUD.url}/rest/v1/${CLOUD.table}?id=eq.${CLOUD.rowId}&select=data`,{headers:{apikey:CLOUD.anonKey,Authorization:'Bearer '+CLOUD.anonKey}});
     if(!r.ok)throw new Error('HTTP '+r.status);
     const rows=await r.json();
-    if(rows&&rows[0]&&rows[0].data&&Object.keys(rows[0].data).length){STATE=rows[0].data;ensureDefaults();localStorage.setItem(LS_KEY,JSON.stringify(STATE));setStatus('✔ sincronizado con la nube');}
+    if(rows&&rows[0]&&rows[0].data&&Object.keys(rows[0].data).length){STATE=rows[0].data;ensureDefaults();migratePrices();localStorage.setItem(LS_KEY,JSON.stringify(STATE));setStatus('✔ sincronizado con la nube');}
     else{await cloudPush(true);setStatus('✔ nube inicializada');}   // primera vez: sube el estado local
   }catch(e){setStatus('⚠ sin conexión — usando datos locales');}
 }
@@ -578,6 +578,7 @@ function ensureDefaults(){
   STATE.dishFoodCost = STATE.dishFoodCost || {};   // por plato
   STATE.sectionFoodCost = STATE.sectionFoodCost || {}; // por sección
   STATE.dishPortions = STATE.dishPortions || {};   // override porciones
+  STATE.dishPrice = STATE.dishPrice || {};         // precio de venta fijado a mano por plato
   STATE.dishItems = STATE.dishItems || {};         // recetas editadas por plato
   STATE.map = STATE.map || {};                     // ingrediente -> {prod, costPerUnit, unit}
   STATE.priceOverride = STATE.priceOverride || {}; // producto -> precio
@@ -828,9 +829,22 @@ function dishCost(p){
   return total;
 }
 function dishPortions(p){return STATE.dishPortions[p[0]]??p[2];}
-function dishFoodCost(p){return STATE.dishFoodCost[p[0]] ?? STATE.sectionFoodCost[p[1]] ?? STATE.foodCostDefault;}
+// El precio de venta SIEMPRE se fija a mano; el food cost es un resultado.
+function dishManualPrice(p){const v=STATE.dishPrice[p[0]];return (v!=null&&v!=='')?(+v||0):null;}
 function dishCostPerPortion(p){return dishCost(p)/Math.max(1,dishPortions(p));}
-function suggestedPrice(p){const fc=dishFoodCost(p)/100;return fc>0?dishCostPerPortion(p)/fc:0;}
+function suggestedPrice(p){const mp=dishManualPrice(p);return (mp&&mp>0)?mp:0;}                 // precio de venta manual
+function dishFoodCost(p){const mp=dishManualPrice(p);return (mp&&mp>0)?dishCostPerPortion(p)/mp*100:0;}  // food cost DERIVADO
+// migración: al pasar a "solo precio manual", cada plato arranca con el precio que ya tenía
+function migratePrices(){
+  if(STATE.pricesMigrated)return;
+  allPlatos().forEach(p=>{const nm=p[0];
+    if(STATE.dishPrice[nm]==null||STATE.dishPrice[nm]===''){
+      const fc=((STATE.dishFoodCost&&STATE.dishFoodCost[nm]) ?? (STATE.sectionFoodCost&&STATE.sectionFoodCost[p[1]]) ?? STATE.foodCostDefault ?? 30)/100;
+      const price=fc>0?roundPrice(dishCostPerPortion(p)/fc):0;
+      if(price>0)STATE.dishPrice[nm]=price;
+    }});
+  STATE.pricesMigrated=true;save();
+}
 function roundPrice(v){return Math.round(v/100)*100;}
 function precioPublico(neto){return roundPrice(neto*(1+(STATE.incPct||0)/100));}
 
@@ -926,18 +940,12 @@ function renderResumen(){
     <div class="kpi"><div class="v">${avgFc.toFixed(0)}%</div><div class="l">Food cost promedio</div></div>
     ${um?`<div class="kpi"><div class="v" style="color:var(--red)">${um}</div><div class="l">Insumos sin vincular</div></div>`:''}
   </div>`;
-  h+=`<div class="card"><h2>Carta con precio sugerido</h2>
-  <div class="hint">Precio sugerido = costo por porción ÷ food cost %. Ajusta el food cost % en cada plato (pestaña Platos). Precios redondeados a $100.</div>
-  <div class="controls"><label>Food cost % general (si una sección no tiene valor propio):</label><input type="number" id="fcDef" value="${STATE.foodCostDefault}" onchange="STATE.foodCostDefault=parseFloat(this.value)||30;save();showTab('resumen')"> %
-  <label>Impuesto al consumo (INC) %:</label><input type="number" value="${STATE.incPct}" onchange="STATE.incPct=parseFloat(this.value)||0;save();showTab('resumen')" style="width:70px"> %
+  h+=`<div class="card"><h2>Carta y precios de venta</h2>
+  <div class="hint">Escribe el <b>precio de venta neto</b> de cada plato en la columna <b>Precio neto</b>. El <b>food cost %</b> se calcula solo (costo ÷ precio) — entre más bajo, mejor (ideal ≤ 35%). El precio público agrega el ${STATE.incPct}% de INC.</div>
+  <div class="controls"><label>Impuesto al consumo (INC) %:</label><input type="number" value="${STATE.incPct}" onchange="STATE.incPct=parseFloat(this.value)||0;save();showTab('resumen')" style="width:70px"> %
   <button class="btn" onclick="exportExcel()">⬇ Exportar a Excel (CSV)</button>
   <button class="btn" onclick="printReport()">🖨 Imprimir / Guardar PDF</button>
-  <button class="btn" onclick="generateInforme()">📄 Informe gerencial</button></div>
-  <div class="card" style="background:var(--panel2);margin-bottom:16px">
-    <h2 style="font-size:14px">Food cost % por sección</h2>
-    <div class="hint" style="margin-bottom:10px">Define el objetivo de cada sección (editable cuando lo necesites). Si lo dejas vacío usa el general. Un ajuste en un plato individual (pestaña Platos) tiene prioridad sobre estos.</div>
-    <div class="controls" style="background:none;padding:0">${secciones().map(s=>`<label>${s}: <input type="number" class="foodcost-in" value="${STATE.sectionFoodCost[s]??''}" placeholder="${STATE.foodCostDefault}" onchange="setSectionFC('${esc(s)}',this.value)"> %</label>`).join('')}</div>
-  </div>`;
+  <button class="btn" onclick="generateInforme()">📄 Informe gerencial</button></div></div>`;
   const actualFijos=fixedActual();
   const fijoPorPlato=STATE.volumenMes>0?actualFijos/STATE.volumenMes:0;
   h+=`<div class="card" style="background:var(--panel2);margin-bottom:16px">
@@ -948,15 +956,23 @@ function renderResumen(){
       <span style="color:var(--muted)">→ Costo fijo por plato: <b>${fmt(fijoPorPlato)}</b></span>
     </div>
   </div>
-  <div class="scroll"><table><thead><tr><th>Plato</th><th>Sección</th><th class="num">Costo insumos</th><th class="num">Precio neto</th><th class="num">Precio público (+${STATE.incPct}% INC)</th><th class="num">Margen contrib.</th><th class="num">Util. neta/plato</th><th class="num">Rentab. %</th></tr></thead><tbody>`;
+  <div class="scroll"><table><thead><tr><th>Plato</th><th>Sección</th><th class="num">Costo insumos</th><th class="num">Precio neto (edita)</th><th class="num">Food cost %</th><th class="num">Precio público (+${STATE.incPct}% INC)</th><th class="num">Margen contrib.</th><th class="num">Util. neta/plato</th><th class="num">Rentab. %</th></tr></thead><tbody>`;
   let sect="";
   dishes.forEach(d=>{
-    if(d.p[1]!==sect){sect=d.p[1];h+=`<tr><td colspan="8" style="background:var(--panel2);color:var(--accent);font-weight:700">${sect}</td></tr>`;}
+    if(d.p[1]!==sect){sect=d.p[1];h+=`<tr><td colspan="9" style="background:var(--panel2);color:var(--accent);font-weight:700">${sect}</td></tr>`;}
     const mc=d.price-d.cpp;
     const neta=mc-fijoPorPlato;
     const rent=d.price>0?neta/d.price*100:0;
     const col=neta>=0?'var(--green)':'var(--red)';
-    h+=`<tr><td><b>${d.p[0]}</b></td><td>${d.p[1]}</td><td class="num">${fmt(d.cpp)}</td><td class="num">${fmt(d.price)}</td><td class="num price"><b>${fmt(precioPublico(d.price))}</b></td><td class="num">${fmt(mc)}</td><td class="num" style="color:${col};font-weight:700">${fmt(neta)}</td><td class="num" style="color:${col};font-weight:700">${rent.toFixed(0)}%</td></tr>`;
+    const fcCol=!d.price?'var(--muted)':(d.fc<=35?'var(--green)':(d.fc<=45?'var(--accent2)':'var(--red)'));
+    const E=esc(d.p[0]);
+    h+=`<tr><td><b>${d.p[0]}</b></td><td>${d.p[1]}</td><td class="num">${fmt(d.cpp)}</td>
+      <td class="num"><input class="cost" style="width:90px" value="${dishManualPrice(d.p)!=null?dishManualPrice(d.p):''}" placeholder="—" onchange="setDishPrice('${E}',this.value)"></td>
+      <td class="num" style="color:${fcCol};font-weight:700">${d.price?d.fc.toFixed(0)+'%':'—'}</td>
+      <td class="num price"><b>${d.price?fmt(precioPublico(d.price)):'—'}</b></td>
+      <td class="num">${d.price?fmt(mc):'—'}</td>
+      <td class="num" style="color:${col};font-weight:700">${d.price?fmt(neta):'—'}</td>
+      <td class="num" style="color:${col};font-weight:700">${d.price?rent.toFixed(0)+'%':'—'}</td></tr>`;
   });
   h+=`</tbody></table></div>
   <div class="hint" style="margin-top:8px">⚠️ La utilidad neta reparte los costos fijos <b>en partes iguales</b> por plato vendido. Es una guía: en la práctica unos platos se venden más que otros. El <b>margen de contribución</b> sigue siendo el indicador más confiable para decidir precios.</div></div>`;
@@ -1032,7 +1048,8 @@ function renderPlatos(){
   allPlatos().forEach((p)=>{
     const dn=p[0];
     if(p[1]!==sect){sect=p[1];h+=`<h3 style="color:var(--accent);margin:18px 0 8px">${sect}</h3>`;}
-    const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p),port=dishPortions(p);
+    const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p),port=dishPortions(p),mp=dishManualPrice(p);
+    const fcTxt=(+fc)%1===0?(+fc):(+fc).toFixed(1);
     const isCustom=(STATE.customPlatos||[]).some(cp=>cp.n===dn);
     const batch=p[2]>1, edited=!isCustom&&!!STATE.dishItems[dn], opened=OPEN.has(dn);
     const E=esc(dn);
@@ -1041,12 +1058,13 @@ function renderPlatos(){
         <div><div class="name">${dn} ${isCustom?'<span class="pill sub">nuevo</span>':(edited?'<span class="pill ok">editada</span>':'')}</div><div class="sect">${p[1]}${batch?' · receta por lote':''}</div></div>
         <div class="dish-metrics">
           <div class="metric"><div class="v">${fmt(cpp)}</div><div class="l">Costo/porción</div></div>
-          <div class="metric"><div class="v price">${fmt(price)}</div><div class="l">Precio sugerido</div></div>
+          <div class="metric"><div class="v price">${mp?fmt(price):'—'}</div><div class="l">Precio de venta</div></div>
         </div>
       </div>
       <div class="dish-body">
         <div class="controls">
-          <label>Food cost %: <input type="number" class="foodcost-in" value="${fc}" onchange="STATE.dishFoodCost['${E}']=parseFloat(this.value)||30;save();renderPlatos()"></label>
+          <label><b>Precio de venta $:</b> <input type="number" class="foodcost-in" style="width:110px" value="${mp!=null?mp:''}" placeholder="escribe el precio" onchange="setDishPrice('${E}',this.value)"></label>
+          <span style="color:var(--muted)">Food cost resultante: <b style="color:${mp&&fc<=35?'var(--green)':(mp?'var(--red)':'var(--muted)')}">${mp?fcTxt+'%':'—'}</b></span>
           <label>Porciones que rinde: <input type="number" class="foodcost-in" value="${port}" onchange="STATE.dishPortions['${E}']=parseFloat(this.value)||1;save();renderPlatos()"></label>
           <span style="color:var(--muted)">Costo total receta: <b>${fmt(dishCost(p))}</b></span>
           ${edited?`<button class="btn ghost" style="padding:5px 10px" onclick="resetDish('${E}')">↺ Restablecer receta original</button>`:''}
@@ -1083,6 +1101,7 @@ function resetDish(dn){if(confirm('¿Restablecer la receta original de "'+dn+'"?
 function refreshActive(){const a=document.querySelector('nav button.active');if(a)showTab(a.dataset.t);}
 function setProdForIng(ing,val){const k=norm(ing);STATE.map[k]=STATE.map[k]||{};if(val===''){delete STATE.map[k].prod;}else{STATE.map[k].prod=val;}STATE.map[k].costPerUnit="";save();clearCache();refreshActive();}
 function setCostForIng(ing,val){const k=norm(ing);STATE.map[k]=STATE.map[k]||{};STATE.map[k].costPerUnit=val;save();clearCache();refreshActive();}
+function setDishPrice(dn,val){if(val===''||val==null||isNaN(parseFloat(val))){delete STATE.dishPrice[dn];}else{STATE.dishPrice[dn]=parseFloat(val);}save();refreshActive();}
 function addPlato(){
   const nEl=document.getElementById('npDishName'), sEl=document.getElementById('npDishSec');
   const n=(nEl?nEl.value:'').trim(); if(!n){alert('Escribe el nombre del plato.');return;}
@@ -1740,6 +1759,7 @@ function generateInforme(){
 /* ============ INIT ============ */
 buildNav();
 refreshLockUI();
+migratePrices();
 if(cloudOn()){
   setStatus('cargando desde la nube…');
   cloudPull().then(()=>{ showTab('resumen'); });
