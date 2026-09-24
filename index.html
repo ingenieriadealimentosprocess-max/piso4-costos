@@ -79,6 +79,7 @@ details summary{cursor:pointer;color:var(--accent);font-size:13px;margin:8px 0}
   <div class="toolbar" style="margin:0;align-items:center">
     <span id="cloudStatus" style="font-size:12px;color:var(--muted)"></span>
     <button class="btn" id="editBtn" onclick="toggleEdit()" style="display:none">🔒 Editar</button>
+    <button class="btn" id="saveBtn" onclick="guardarAhora()" style="display:none;background:var(--green);color:#fff">💾 Guardar</button>
     <button class="btn" onclick="exportData()">⬇ Respaldar datos</button>
     <button class="btn ghost" onclick="importData()">⬆ Restaurar</button>
     <button class="btn ghost" onclick="resetAll()">↺ Reiniciar</button>
@@ -97,6 +98,7 @@ details summary{cursor:pointer;color:var(--accent);font-size:13px;margin:8px 0}
   <div class="tab" id="tab-fijos"></div>
   <div class="tab" id="tab-inventario"></div>
   <div class="tab" id="tab-movimientos"></div>
+  <div class="tab" id="tab-manual"></div>
 </main>
 <div class="foot">Piso Cuatro · Sistema de costeo · En modo nube los cambios se guardan para todos; en modo local, solo en este navegador.</div>
 
@@ -550,13 +552,14 @@ async function cloudPull(){
 }
 function scheduleCloudPush(){clearTimeout(pushTimer);pushTimer=setTimeout(()=>cloudPush(),800);}
 async function cloudPush(force){
-  if(!cloudOn())return; if(!EDITABLE&&!force)return;
+  if(!cloudOn())return false; if(!EDITABLE&&!force)return false;
   try{
     setStatus('guardando…');
     const r=await fetch(`${CLOUD.url}/rest/v1/${CLOUD.table}?id=eq.${CLOUD.rowId}`,{method:'PATCH',headers:cloudHeaders(),body:JSON.stringify({data:STATE})});
     if(!r.ok)throw new Error('HTTP '+r.status);
     setStatus('✔ guardado en la nube · '+new Date().toLocaleTimeString('es-CO'));
-  }catch(e){setStatus('⚠ error al guardar en la nube');}
+    return true;
+  }catch(e){setStatus('⚠ error al guardar en la nube');return false;}
 }
 function toggleEdit(){
   if(EDITABLE){EDITABLE=false;refreshLockUI();return;}
@@ -566,10 +569,28 @@ function toggleEdit(){
   else alert('Contraseña incorrecta.');
 }
 function refreshLockUI(){
-  const btn=document.getElementById('editBtn'),ban=document.getElementById('lockBanner');
+  const btn=document.getElementById('editBtn'),ban=document.getElementById('lockBanner'),sv=document.getElementById('saveBtn');
+  if(sv)sv.style.display=(EDITABLE)?'':'none';   // botón Guardar solo cuando se puede editar
   if(!cloudOn()){if(btn)btn.style.display='none';if(ban)ban.style.display='none';return;}
   if(btn){btn.style.display='';btn.textContent=EDITABLE?'✏️ Editando (clic para bloquear)':'🔒 Editar';}
   if(ban){ban.style.display='';ban.textContent=EDITABLE?'✏️ Modo edición — tus cambios se guardan en la nube para todos.':'🔒 Modo lectura — los cambios NO se guardan. Clic en “Editar” e ingresa la contraseña para modificar.';}
+}
+function toast(msg,ok){
+  let t=document.getElementById('toastMsg');
+  if(!t){t=document.createElement('div');t.id='toastMsg';t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a7a3c;color:#fff;padding:12px 22px;border-radius:10px;font-size:15px;font-weight:700;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.4);transition:opacity .3s';document.body.appendChild(t);}
+  t.style.background=ok===false?'#c0392b':'#1a7a3c';
+  t.textContent=msg; t.style.opacity='1';
+  clearTimeout(t._h); t._h=setTimeout(()=>{t.style.opacity='0';},2200);
+}
+function guardarAhora(){
+  save();
+  if(cloudOn()){
+    if(!EDITABLE){toast('Estás en modo lectura — activa Editar para guardar en la nube',false);return;}
+    toast('Guardando…');
+    cloudPush(true).then(ok=>toast(ok?'✔ Guardado en la nube':'⚠ No se pudo guardar (revisa tu conexión)',ok));
+  } else {
+    toast('✔ Guardado en este equipo');
+  }
 }
 function ensureDefaults(){
   STATE.foodCostDefault = STATE.foodCostDefault ?? 30;
@@ -915,7 +936,7 @@ const fmt2=v=>v==null||isNaN(v)?'—':'$'+v.toLocaleString('es-CO',{maximumFract
 const fmtN=v=>v==null||isNaN(v)?'0':(+v).toLocaleString('es-CO',{maximumFractionDigits:2});
 
 /* ============ TABS ============ */
-const TABS=[["resumen","📋 Resumen / Carta"],["rentabilidad","📈 Rentabilidad"],["platos","🍽 Platos"],["subrecetas","🥣 Sub-recetas"],["bebidas","🥤 Bebidas embotelladas"],["inventario","📦 Inventario"],["movimientos","🔄 Movimientos"],["vinculacion","🔗 Vinculación insumos"],["insumos","💲 Precios insumos"],["fijos","🏠 Costos fijos"]];
+const TABS=[["resumen","📋 Resumen / Carta"],["rentabilidad","📈 Rentabilidad"],["platos","🍽 Platos"],["subrecetas","🥣 Sub-recetas"],["bebidas","🥤 Bebidas embotelladas"],["inventario","📦 Inventario"],["movimientos","🔄 Movimientos"],["vinculacion","🔗 Vinculación insumos"],["insumos","💲 Precios insumos"],["fijos","🏠 Costos fijos"],["manual","📖 Manual"]];
 function buildNav(){
   const nav=document.getElementById('nav');
   nav.innerHTML=TABS.map(t=>`<button data-t="${t[0]}" onclick="showTab('${t[0]}')">${t[1]}</button>`).join('');
@@ -925,7 +946,7 @@ function showTab(t){
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.t===t));
   document.getElementById('tab-'+t).classList.add('active');
-  ({resumen:renderResumen,rentabilidad:renderRentabilidad,platos:renderPlatos,subrecetas:renderSub,bebidas:renderBebidas,inventario:renderInventario,movimientos:renderMovs,vinculacion:renderVinc,insumos:renderInsumos,fijos:renderFijos}[t])();
+  ({resumen:renderResumen,rentabilidad:renderRentabilidad,platos:renderPlatos,subrecetas:renderSub,bebidas:renderBebidas,inventario:renderInventario,movimientos:renderMovs,vinculacion:renderVinc,insumos:renderInsumos,fijos:renderFijos,manual:renderManual}[t])();
 }
 
 /* ---- RESUMEN ---- */
@@ -1243,6 +1264,68 @@ function exportBebidas(){
   (STATE.bebidas||[]).forEach(b=>{const costo=+b.costo||0,precio=+b.precio||0,mg=precio-costo,mgp=precio>0?mg/precio*100:0;
     csv+=`"${(b.n||'').replace(/"/g,'""')}",${costo},${precio},${precioPublico(precio)},${mg},${mgp.toFixed(0)}%\n`;});
   const blob=new Blob(['﻿'+csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='bebidas_embotelladas_piso4.csv';a.click();
+}
+
+/* ---- MANUAL DE USO ---- */
+function renderManual(){
+  const h=`
+  <div class="card"><h2>📖 Manual de uso — Sistema de Costos Piso Cuatro</h2>
+  <div class="hint">Guía sencilla para que cualquier persona pueda usar el programa. Léela una vez y tendrás claro para qué sirve cada parte.</div></div>
+
+  <div class="card"><h2 style="font-size:16px">¿Para qué sirve este programa?</h2>
+  <p>Permite saber <b>cuánto cuesta cada plato y bebida</b>, <b>ponerles precio de venta</b>, ver la <b>rentabilidad</b> del negocio y llevar el <b>inventario</b> (entradas, salidas y ventas). Todo se guarda <b>en la nube</b>: quien abra el enlace ve la misma información actualizada.</p></div>
+
+  <div class="card"><h2 style="font-size:16px">🔒 Ver vs. Editar (contraseña)</h2>
+  <ul>
+    <li>Al abrir el enlace, el sistema está en <b>Modo lectura</b>: cualquiera puede ver la información, pero <b>no puede cambiarla</b>.</li>
+    <li>Para modificar algo, haz clic en el botón <b>🔒 Editar</b> (arriba a la derecha) e ingresa la <b>contraseña</b>. Ahí los cambios se guardan para todos.</li>
+    <li>Cuando termines, puedes volver a bloquear con el mismo botón. Así se evita que alguien cambie algo por accidente.</li>
+  </ul></div>
+
+  <div class="card"><h2 style="font-size:16px">Conceptos clave (en palabras simples)</h2>
+  <ul>
+    <li><b>Costo de insumos:</b> lo que cuestan los ingredientes de un plato.</li>
+    <li><b>Precio de venta (neto):</b> el precio que tú defines, <b>sin</b> impuesto.</li>
+    <li><b>Precio público:</b> lo que paga el cliente = precio neto + <b>${STATE.incPct}% de impuesto al consumo (INC)</b>.</li>
+    <li><b>Food cost %:</b> qué parte del precio se va en ingredientes (costo ÷ precio). <b>Entre más bajo, mejor</b>; lo ideal suele ser ≤ 35%. El sistema lo calcula solo y lo colorea (🟢 bien, 🔴 alto).</li>
+    <li><b>Margen de contribución:</b> lo que deja cada plato después de los ingredientes (precio − costo). Sirve para cubrir los costos fijos y generar utilidad.</li>
+    <li><b>Merma:</b> lo que se pierde de un ingrediente al limpiarlo/pelarlo (ej. 30%). El sistema sube el costo real automáticamente.</li>
+  </ul></div>
+
+  <div class="card"><h2 style="font-size:16px">Las pestañas, una por una</h2>
+  <p><b>📋 Resumen / Carta.</b> La vista principal. Muestra todos los platos con su costo, y aquí <b>escribes el precio de venta</b> (columna "Precio neto"). El food cost % se calcula solo. Botones para <b>exportar a Excel</b>, <b>PDF</b> e <b>informe gerencial</b>.</p>
+  <p><b>📈 Rentabilidad.</b> Muestra el margen de contribución de cada plato y una proyección mensual del negocio. Ajusta el campo <b>"Platos vendidos al mes"</b> para ver el resultado esperado.</p>
+  <p><b>🍽 Platos.</b> Aquí se <b>crean, editan y eliminan platos</b>. Clic en un plato para abrirlo: cambias ingredientes, cantidades, el precio de venta y las porciones. Para uno nuevo usa <b>"➕ Nuevo plato"</b> (eliges o creas la categoría).</p>
+  <p><b>🥣 Sub-recetas.</b> Preparaciones base (salsas, teriyaki, etc.) que se usan dentro de los platos. Se crean y editan igual que los platos; su costo se reparte automáticamente donde se usen.</p>
+  <p><b>🥤 Bebidas embotelladas.</b> Para bebidas de reventa (gaseosas, cervezas, aguas). Escribes <b>costo de compra</b> y <b>precio de venta</b>, y ves el margen. (Los jugos/cócteles con receta van en 🍽 Platos, categoría "Bebidas Frías/Calientes".)</p>
+  <p><b>📦 Inventario.</b> El stock actual de cada insumo y bebida (en gramos/ml/unidades). Editas el <b>stock</b> y el <b>mínimo</b> (para las alertas). Arriba ves el <b>valor del inventario</b> y las <b>alertas</b> de lo que está por debajo del mínimo.</p>
+  <p><b>🔄 Movimientos.</b> El corazón del inventario:
+    <ul>
+      <li><b>📥 Entrada / Compra:</b> sumar stock cuando compras.</li>
+      <li><b>📤 Salida / Baja:</b> descontar por merma, daño o traslado.</li>
+      <li><b>🧾 Venta:</b> eliges un plato/bebida y la cantidad → descuenta sus ingredientes según la receta.</li>
+      <li><b>📋 Carga masiva:</b> importas el archivo de ventas descargado de <b>Pirpos</b> (Excel o CSV) y descuenta todo de una. Los nombres nuevos los emparejas una vez y quedan recordados.</li>
+      <li><b>📜 Kardex:</b> historial de todos los movimientos.</li>
+    </ul>
+  </p>
+  <p><b>🔗 Vinculación insumos.</b> Conecta cada ingrediente de las recetas con un producto de la lista de precios, define su <b>$/unidad</b> y su <b>% de merma</b>. Normalmente ya está configurado; solo lo tocas si un costo se ve raro.</p>
+  <p><b>💲 Precios insumos.</b> La lista de precios de compra. Edita un precio cuando cambie, cambia la unidad o agrega un insumo nuevo.</p>
+  <p><b>🏠 Costos fijos.</b> Arriendo, nómina, servicios, etc. <b>Actualízalos cada mes</b> (edita el valor, desactiva lo que no aplique, agrega o elimina). Afecta el punto de equilibrio y la rentabilidad.</p></div>
+
+  <div class="card"><h2 style="font-size:16px">✅ Rutina recomendada</h2>
+  <ul>
+    <li><b>Al inicio:</b> carga el stock inicial en 📦 Inventario y ponle mínimos a los insumos importantes.</li>
+    <li><b>Cuando compras:</b> registra la compra en 🔄 Movimientos → 📥 Entrada.</li>
+    <li><b>Cada día/servicio:</b> descarga el reporte de Pirpos e impórtalo en 🔄 Movimientos → 📋 Carga masiva. El inventario se descuenta solo.</li>
+    <li><b>Cuando cambian precios de insumos:</b> actualízalos en 💲 Precios insumos; los platos se recalculan solos.</li>
+    <li><b>Cada mes:</b> revisa 🏠 Costos fijos.</li>
+  </ul></div>
+
+  <div class="card"><h2 style="font-size:16px">💾 Copias de seguridad</h2>
+  <p>Todo se guarda en la nube automáticamente. Aun así, de vez en cuando usa el botón <b>⬇ Respaldar datos</b> (arriba) para descargar una copia por seguridad. Con <b>⬆ Restaurar</b> puedes volver a una copia si hiciera falta.</p>
+  <div class="hint" style="margin-top:8px">¿Dudas o algo no funciona como esperas? Anota qué pantalla y qué botón usaste, y pídele ayuda a quien administra el sistema.</div></div>
+  `;
+  document.getElementById('tab-manual').innerHTML=h;
 }
 
 /* ---- INVENTARIO ---- */
