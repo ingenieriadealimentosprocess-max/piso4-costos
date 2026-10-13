@@ -604,6 +604,8 @@ function ensureDefaults(){
   STATE.dishFoodCost = STATE.dishFoodCost || {};   // por plato
   STATE.sectionFoodCost = STATE.sectionFoodCost || {}; // por sección
   STATE.dishPortions = STATE.dishPortions || {};   // override porciones
+  STATE.bevCostTarget = STATE.bevCostTarget ?? 25;  // beverage cost % objetivo (bebidas)
+  STATE.volumenBebidas = STATE.volumenBebidas ?? 0; // bebidas vendidas al mes (estimado)
   STATE.dishPrice = STATE.dishPrice || {};         // precio de venta fijado a mano por plato
   STATE.dishItems = STATE.dishItems || {};         // recetas editadas por plato
   STATE.map = STATE.map || {};                     // ingrediente -> {prod, costPerUnit, unit}
@@ -735,7 +737,8 @@ function packSize(name){
 function allPlatos(){
   const base=PLATOS.filter(p=>!STATE.hiddenPlatos[p[0]]);
   const custom=(STATE.customPlatos||[]).map(cp=>[cp.n,cp.sec,cp.port||1,STATE.dishItems[cp.n]||[]]);
-  return base.concat(custom);
+  const all=base.concat(custom);
+  return all.filter(p=>!isBev(p)).concat(all.filter(isBev));   // platos primero, bebidas después
 }
 function subList(){
   const base=SUBRECETAS.map(s=>[s[0], STATE.subYield[s[0]]??s[1], STATE.subItems[s[0]]||s[2]]);
@@ -854,6 +857,11 @@ function dishCost(p){
   for(const [ing,qty,unit] of dishItems(p)){const l=costLine(ing,qty,unit);if(l.cost!=null)total+=l.cost;}
   return total;
 }
+// Bebidas (con receta) = sección "Bebidas ..." / cócteles. KPI: beverage cost. Sin reparto de costos fijos.
+function isBev(p){const s=String(p[1]||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');return /bebida|jugo|cocte|licor|mocktail|sangria|shot|cafe|malteada|limonada|smoothie|batido/.test(s);}
+let _grp="";
+function grpBanner(p,cols){const g=isBev(p)?"b":"f";if(g===_grp)return"";_grp=g;return `<tr><td colspan="${cols}" style="background:${g==="b"?"#1b1b1b":"var(--accent)"};color:#fff;font-weight:800;letter-spacing:.5px;font-size:14px">${g==="b"?"🥤 BEBIDAS · beverage cost (sin costos fijos)":"🍽 PLATOS · food cost"}</td></tr>`;}
+function costKpiColor(p,v){const t=isBev(p)?(STATE.bevCostTarget||25):35;return v<=t?'var(--green)':(v<=t+10?'var(--accent2)':'var(--red)');}
 function dishPortions(p){return STATE.dishPortions[p[0]]??p[2];}
 // El precio de venta SIEMPRE se fija a mano; el food cost es un resultado.
 function dishManualPrice(p){const v=STATE.dishPrice[p[0]];return (v!=null&&v!=='')?(+v||0):null;}
@@ -934,7 +942,7 @@ function matchPOS(posName){
 function valorInventario(){let v=0;allInvItems().forEach(it=>{v+=stockOf(it.id)*unitCostForInv(it);});return v;}
 
 /* ============ UTILIDADES UI ============ */
-function secciones(){const o=[];allPlatos().forEach(p=>{if(!o.includes(p[1]))o.push(p[1]);});return o;}
+function secciones(){const o=[];allPlatos().forEach(p=>{if(!o.includes(p[1]))o.push(p[1]);});["Cocteles Clásicos","Cocteles de Autor","Mocktail","Sangrías","Shots","Cafés","Malteadas"].forEach(c=>{if(!o.includes(c))o.push(c);});return o;}
 function setSectionFC(s,v){if(v===''||v==null)delete STATE.sectionFoodCost[s];else STATE.sectionFoodCost[s]=parseFloat(v);save();showTab('resumen');}
 const fmt=v=>v==null||isNaN(v)?'—':'$'+Math.round(v).toLocaleString('es-CO');
 const fmt2=v=>v==null||isNaN(v)?'—':'$'+v.toLocaleString('es-CO',{maximumFractionDigits:2});
@@ -957,17 +965,21 @@ function showTab(t){
 /* ---- RESUMEN ---- */
 function renderResumen(){
   const dishes=allPlatos().map(p=>({p,cpp:dishCostPerPortion(p),price:roundPrice(suggestedPrice(p)),fc:dishFoodCost(p)}));
-  const avgFc=dishes.reduce((a,d)=>a+d.fc,0)/dishes.length;
+  const foodD=dishes.filter(d=>!isBev(d.p)), bevD=dishes.filter(d=>isBev(d.p));
+  const avgOf=a=>{const w=a.filter(d=>d.price>0);return w.length?w.reduce((s,d)=>s+d.fc,0)/w.length:0;};
+  const avgFc=avgOf(foodD), avgBc=avgOf(bevD);
   const um=uniqueIngredients().filter(i=>ingCostPerUnit(i.name)==null).length;
   let h=`<div class="kpis">
-    <div class="kpi"><div class="v">${allPlatos().length}</div><div class="l">Platos en carta</div></div>
+    <div class="kpi"><div class="v">${foodD.length}</div><div class="l">Platos en carta</div></div>
+    <div class="kpi"><div class="v">${bevD.length}</div><div class="l">Bebidas con receta</div></div>
     <div class="kpi"><div class="v">${SUBRECETAS.length}</div><div class="l">Sub-recetas</div></div>
     <div class="kpi"><div class="v">${PRODUCTS.length}</div><div class="l">Insumos con precio</div></div>
-    <div class="kpi"><div class="v">${avgFc.toFixed(0)}%</div><div class="l">Food cost promedio</div></div>
+    <div class="kpi"><div class="v">${avgFc.toFixed(0)}%</div><div class="l">Food cost promedio (platos)</div></div>
+    <div class="kpi"><div class="v">${avgBc.toFixed(0)}%</div><div class="l">Beverage cost promedio (bebidas)</div></div>
     ${um?`<div class="kpi"><div class="v" style="color:var(--red)">${um}</div><div class="l">Insumos sin vincular</div></div>`:''}
   </div>`;
   h+=`<div class="card"><h2>Carta y precios de venta</h2>
-  <div class="hint">Escribe el <b>precio de venta neto</b> de cada plato en la columna <b>Precio neto</b>. El <b>food cost %</b> se calcula solo (costo ÷ precio) — entre más bajo, mejor (ideal ≤ 35%). El precio público agrega el ${STATE.incPct}% de INC.</div>
+  <div class="hint">Escribe el <b>precio de venta neto</b> de cada plato en la columna <b>Precio neto</b>. El <b>food cost %</b> se calcula solo (costo ÷ precio) — entre más bajo, mejor (ideal ≤ 35% en platos; en bebidas el <b>beverage cost</b> ideal es ≤ ${STATE.bevCostTarget}%). El precio público agrega el ${STATE.incPct}% de INC.</div>
   <div class="controls"><label>Impuesto al consumo (INC) %:</label><input type="number" value="${STATE.incPct}" onchange="STATE.incPct=parseFloat(this.value)||0;save();showTab('resumen')" style="width:70px"> %
   <button class="btn" onclick="exportExcel()">⬇ Exportar a Excel (CSV)</button>
   <button class="btn" onclick="printReport()">🖨 Imprimir / Guardar PDF</button>
@@ -976,32 +988,35 @@ function renderResumen(){
   const fijoPorPlato=STATE.volumenMes>0?actualFijos/STATE.volumenMes:0;
   h+=`<div class="card" style="background:var(--panel2);margin-bottom:16px">
     <h2 style="font-size:14px">Rentabilidad neta — reparto de costos fijos</h2>
-    <div class="hint" style="margin-bottom:10px">La utilidad neta resta a cada plato su parte de costos fijos = costos fijos del mes (${fmt(actualFijos)}) ÷ platos vendidos al mes. Ajusta el volumen para ver el efecto.</div>
+    <div class="hint" style="margin-bottom:10px">La utilidad neta resta a cada plato su parte de costos fijos = costos fijos del mes (${fmt(actualFijos)}) ÷ platos vendidos al mes. <b>Las bebidas no llevan costos fijos</b>: se miden por su <b>beverage cost %</b> y su margen. Ajusta el volumen para ver el efecto.</div>
     <div class="controls" style="background:none;padding:0">
       <label>Platos vendidos al mes: <input type="number" value="${STATE.volumenMes}" onchange="STATE.volumenMes=parseFloat(this.value)||0;save();showTab('resumen')" style="width:110px"></label>
       <span style="color:var(--muted)">→ Costo fijo por plato: <b>${fmt(fijoPorPlato)}</b></span>
     </div>
   </div>
-  <div class="scroll"><table><thead><tr><th>Plato</th><th>Sección</th><th class="num">Costo insumos</th><th class="num">Precio neto (edita)</th><th class="num">Food cost %</th><th class="num">Precio público (+${STATE.incPct}% INC)</th><th class="num">Margen contrib.</th><th class="num">Util. neta/plato</th><th class="num">Rentab. %</th></tr></thead><tbody>`;
-  let sect="";
+  <div class="scroll"><table><thead><tr><th>Plato</th><th>Sección</th><th class="num">Costo insumos</th><th class="num">Precio neto (edita)</th><th class="num">Food / Bev. cost %</th><th class="num">Precio público (+${STATE.incPct}% INC)</th><th class="num">Margen contrib.</th><th class="num">Util. neta/plato</th><th class="num">Rentab. %</th></tr></thead><tbody>`;
+  let sect="";_grp="";
   dishes.forEach(d=>{
+    h+=grpBanner(d.p,9);
     if(d.p[1]!==sect){sect=d.p[1];h+=`<tr><td colspan="9" style="background:var(--panel2);color:var(--accent);font-weight:700">${sect}</td></tr>`;}
     const mc=d.price-d.cpp;
-    const neta=mc-fijoPorPlato;
+    const bev=isBev(d.p);
+    const neta=bev?mc:mc-fijoPorPlato;   // bebidas: sin costos fijos
     const rent=d.price>0?neta/d.price*100:0;
     const col=neta>=0?'var(--green)':'var(--red)';
-    const fcCol=!d.price?'var(--muted)':(d.fc<=35?'var(--green)':(d.fc<=45?'var(--accent2)':'var(--red)'));
+    const fcCol=!d.price?'var(--muted)':costKpiColor(d.p,d.fc);
     const E=esc(d.p[0]);
     h+=`<tr><td><b>${d.p[0]}</b></td><td>${d.p[1]}</td><td class="num">${fmt(d.cpp)}</td>
       <td class="num"><input class="cost" style="width:90px" value="${dishManualPrice(d.p)!=null?dishManualPrice(d.p):''}" placeholder="—" onchange="setDishPrice('${E}',this.value)"></td>
-      <td class="num" style="color:${fcCol};font-weight:700">${d.price?d.fc.toFixed(0)+'%':'—'}</td>
+      <td class="num" style="color:${fcCol};font-weight:700" title="${bev?'Beverage cost':'Food cost'}">${d.price?d.fc.toFixed(0)+'%':'—'}${bev?' <small>bev</small>':''}</td>
       <td class="num price"><b>${d.price?fmt(precioPublico(d.price)):'—'}</b></td>
       <td class="num">${d.price?fmt(mc):'—'}</td>
-      <td class="num" style="color:${col};font-weight:700">${d.price?fmt(neta):'—'}</td>
+      <td class="num" style="color:${col};font-weight:700">${d.price?fmt(neta)+(bev?'*':''):'—'}</td>
       <td class="num" style="color:${col};font-weight:700">${d.price?rent.toFixed(0)+'%':'—'}</td></tr>`;
   });
   h+=`</tbody></table></div>
-  <div class="hint" style="margin-top:8px">⚠️ La utilidad neta reparte los costos fijos <b>en partes iguales</b> por plato vendido. Es una guía: en la práctica unos platos se venden más que otros. El <b>margen de contribución</b> sigue siendo el indicador más confiable para decidir precios.</div></div>`;
+  <div class="hint" style="margin-top:8px">⚠️ La utilidad neta reparte los costos fijos <b>en partes iguales</b> por plato vendido. Es una guía: en la práctica unos platos se venden más que otros. El <b>margen de contribución</b> sigue siendo el indicador más confiable para decidir precios. <b>*</b> Bebidas: utilidad = margen de contribución (sin costos fijos).</div>
+  <div class="controls" style="margin-top:8px"><label>Beverage cost % objetivo (bebidas): <input type="number" value="${STATE.bevCostTarget}" onchange="STATE.bevCostTarget=parseFloat(this.value)||25;save();showTab('resumen')" style="width:70px"> %</label></div></div>`;
   document.getElementById('tab-resumen').innerHTML=h;
 }
 
@@ -1012,15 +1027,18 @@ function renderRentabilidad(){
     const mc=price-cpp, mcPct=price>0?mc/price*100:0;
     return {p,cpp,price,mc,mcPct,fc:dishFoodCost(p)};
   });
-  const avgMC=dishes.reduce((a,d)=>a+d.mc,0)/dishes.length;
-  const avgMCpct=dishes.reduce((a,d)=>a+d.mcPct,0)/dishes.length;
+  const fD=dishes.filter(d=>!isBev(d.p)), bD=dishes.filter(d=>isBev(d.p));
+  const mean=(a,f)=>a.length?a.reduce((s,d)=>s+f(d),0)/a.length:0;
+  const avgMC=mean(fD,d=>d.mc), avgMCpct=mean(fD,d=>d.mcPct);
+  const avgMCb=mean(bD,d=>d.mc);
   const actual=fixedActual();
-  const vol=STATE.volumenMes;
+  const vol=STATE.volumenMes, volB=STATE.volumenBebidas||0;
+  const mcMesB=avgMCb*volB;                 // aporte de bebidas (sin costos fijos propios)
   const mcMes=avgMC*vol;
-  const resultado=mcMes-actual;
-  const equilibrio=avgMC>0?Math.ceil(actual/avgMC):0;
+  const resultado=mcMes+mcMesB-actual;
+  const equilibrio=avgMC>0?Math.max(0,Math.ceil((actual-mcMesB)/avgMC)):0;
   let h=`<div class="kpis">
-    <div class="kpi"><div class="v">${fmt(avgMC)}</div><div class="l">Margen contribución promedio / plato</div></div>
+    <div class="kpi"><div class="v">${fmt(avgMC)}</div><div class="l">Margen contribución promedio / plato (sin bebidas)</div></div>
     <div class="kpi"><div class="v">${avgMCpct.toFixed(0)}%</div><div class="l">% contribución promedio</div></div>
     <div class="kpi"><div class="v">${equilibrio.toLocaleString('es-CO')}</div><div class="l">Punto de equilibrio (platos/mes)</div></div>
   </div>
@@ -1029,13 +1047,15 @@ function renderRentabilidad(){
     <div class="hint">El margen de contribución (precio − costo de insumos) es lo que cada plato aporta para cubrir los costos fijos y dejar utilidad. Aquí ves si el volumen estimado alcanza a cubrir los fijos.</div>
     <div class="controls">
       <label>Platos vendidos al mes (estimado): <input type="number" id="volIn" value="${vol}" onchange="STATE.volumenMes=parseFloat(this.value)||0;save();renderRentabilidad()" style="width:110px"></label>
+      <label>Bebidas vendidas al mes (estimado): <input type="number" value="${volB}" onchange="STATE.volumenBebidas=parseFloat(this.value)||0;save();renderRentabilidad()" style="width:110px"></label>
       <button class="btn" onclick="printReport()">🖨 Descargar / Imprimir PDF</button>
       <button class="btn ghost" onclick="exportRentabilidad()">⬇ Exportar a Excel (CSV)</button>
     </div>
     <table style="max-width:560px">
       <tr><td>Margen de contribución promedio por plato</td><td class="num">${fmt(avgMC)}</td></tr>
       <tr><td>× Platos vendidos al mes</td><td class="num">${vol.toLocaleString('es-CO')}</td></tr>
-      <tr style="font-weight:700"><td>= Margen de contribución mensual</td><td class="num">${fmt(mcMes)}</td></tr>
+      <tr style="font-weight:700"><td>= Margen de contribución mensual (platos)</td><td class="num">${fmt(mcMes)}</td></tr>
+      <tr><td>+ Margen de bebidas (${fmt(avgMCb)} prom. × ${volB.toLocaleString('es-CO')} bebidas; sin costos fijos)</td><td class="num">${fmt(mcMesB)}</td></tr>
       <tr><td>− Costos fijos mensuales</td><td class="num">${fmt(actual)}</td></tr>
       <tr style="font-weight:700;color:${resultado>=0?'var(--green)':'var(--red)'}"><td>= Resultado operativo del mes</td><td class="num">${fmt(resultado)}</td></tr>
     </table>
@@ -1044,8 +1064,9 @@ function renderRentabilidad(){
   <div class="card"><h2>Margen de contribución por plato</h2>
   <div class="hint">Ordena mentalmente: los platos con mayor <b>% de contribución</b> son los más rentables para impulsar en la carta. Precios redondeados a $100.</div>
   <div class="scroll"><table><thead><tr><th>Plato</th><th>Sección</th><th class="num">Precio</th><th class="num">Costo insumos</th><th class="num">Margen contrib. $</th><th class="num">Margen contrib. %</th></tr></thead><tbody>`;
-  let sect="";
+  let sect="";_grp="";
   dishes.forEach(d=>{
+    h+=grpBanner(d.p,6);
     if(d.p[1]!==sect){sect=d.p[1];h+=`<tr><td colspan="6" style="background:var(--panel2);color:var(--accent);font-weight:700">${sect}</td></tr>`;}
     const col=d.mcPct>=70?'var(--green)':(d.mcPct>=60?'var(--accent2)':'var(--red)');
     h+=`<tr><td><b>${d.p[0]}</b></td><td>${d.p[1]}</td><td class="num">${fmt(d.price)}</td><td class="num">${fmt(d.cpp)}</td><td class="num">${fmt(d.mc)}</td><td class="num" style="color:${col};font-weight:700">${d.mcPct.toFixed(0)}%</td></tr>`;
@@ -1070,9 +1091,10 @@ function renderPlatos(){
     <datalist id="secDatalist">${secciones().map(s=>`<option value="${s.replace(/"/g,'&quot;')}">`).join('')}</datalist>
     <button class="btn" onclick="addPlato()">Agregar plato</button>
   </div></div>`;
-  let sect="";
+  let sect="";_grp="";
   allPlatos().forEach((p)=>{
     const dn=p[0];
+    {const g=isBev(p)?"b":"f";if(g!==_grp){_grp=g;h+=`<div style="margin:22px 0 4px;padding:9px 14px;border-radius:8px;color:#fff;font-weight:800;background:${g==="b"?"#1b1b1b":"var(--accent)"}">${g==="b"?"🥤 BEBIDAS · beverage cost":"🍽 PLATOS · food cost"}</div>`;}}
     if(p[1]!==sect){sect=p[1];h+=`<h3 style="color:var(--accent);margin:18px 0 8px">${sect}</h3>`;}
     const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p),port=dishPortions(p),mp=dishManualPrice(p);
     const fcTxt=(+fc)%1===0?(+fc):(+fc).toFixed(1);
@@ -1090,7 +1112,7 @@ function renderPlatos(){
       <div class="dish-body">
         <div class="controls">
           <label><b>Precio de venta $:</b> <input type="number" class="foodcost-in" style="width:110px" value="${mp!=null?mp:''}" placeholder="escribe el precio" onchange="setDishPrice('${E}',this.value)"></label>
-          <span style="color:var(--muted)">Food cost resultante: <b style="color:${mp&&fc<=35?'var(--green)':(mp?'var(--red)':'var(--muted)')}">${mp?fcTxt+'%':'—'}</b></span>
+          <span style="color:var(--muted)">${isBev(p)?'Beverage cost':'Food cost'} resultante: <b style="color:${mp?costKpiColor(p,fc):'var(--muted)'}">${mp?fcTxt+'%':'—'}</b></span>
           <label>Porciones que rinde: <input type="number" class="foodcost-in" value="${port}" onchange="STATE.dishPortions['${E}']=parseFloat(this.value)||1;save();renderPlatos()"></label>
           <span style="color:var(--muted)">Costo total receta: <b>${fmt(dishCost(p))}</b></span>
           ${edited?`<button class="btn ghost" style="padding:5px 10px" onclick="resetDish('${E}')">↺ Restablecer receta original</button>`:''}
@@ -1232,7 +1254,7 @@ function renderBebidas(){
   if(!list.length){h+=`<div class="card"><div class="hint">Aún no hay bebidas embotelladas. Agrega la primera con el formulario de arriba.</div></div>`;}
   else{
     let tCosto=0,tPrecio=0;
-    h+=`<div class="card"><div class="scroll"><table><thead><tr><th>Bebida</th><th class="num">Costo compra</th><th class="num">Precio venta</th><th class="num">Precio público (+${inc}%)</th><th class="num">Margen $</th><th class="num">Margen %</th><th></th></tr></thead><tbody>`;
+    h+=`<div class="card"><div class="scroll"><table><thead><tr><th>Bebida</th><th class="num">Costo compra</th><th class="num">Precio venta</th><th class="num">Precio público (+${inc}%)</th><th class="num">Margen $</th><th class="num">Margen %</th><th class="num">Beverage cost %</th><th></th></tr></thead><tbody>`;
     list.forEach((b,i)=>{
       const costo=+b.costo||0, precio=+b.precio||0, mg=precio-costo, mgp=precio>0?mg/precio*100:0;
       tCosto+=costo;tPrecio+=precio;
@@ -1244,6 +1266,7 @@ function renderBebidas(){
         <td class="num price">${fmt(precioPublico(precio))}</td>
         <td class="num">${fmt(mg)}</td>
         <td class="num" style="color:${col};font-weight:700">${mgp.toFixed(0)}%</td>
+        <td class="num" style="color:${precio>0?(costo/precio*100<=STATE.bevCostTarget?'var(--green)':(costo/precio*100<=STATE.bevCostTarget+10?'var(--accent2)':'var(--red)')):'var(--muted)'};font-weight:700">${precio>0?(costo/precio*100).toFixed(0)+'%':'—'}</td>
         <td><button class="btn ghost" style="padding:3px 9px" onclick="delBebida(${i})">✕</button></td>
       </tr>`;
     });
@@ -1684,8 +1707,8 @@ function printReport(){
     if(p[1]!==sect){sect=p[1];rows+=`<tr class="sec"><td colspan="9">${sect}</td></tr>`;}
     const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p);
     const mc=price-cpp, mcPct=price>0?mc/price*100:0;
-    const neta=mc-fijoPorPlato, rent=price>0?neta/price*100:0;
-    tCosto+=cpp;tPrecio+=price;tMC+=mc;tNeta+=neta;fcs.push(fc);
+    const neta=isBev(p)?mc:mc-fijoPorPlato, rent=price>0?neta/price*100:0;   // bebidas sin costos fijos
+    tCosto+=cpp;tPrecio+=price;tMC+=mc;tNeta+=neta;if(!isBev(p))fcs.push(fc);
     const col=mcPct>=70?'#1a7a3c':(mcPct>=60?'#9a7a1e':'#c0392b');
     const colN=neta>=0?'#1a7a3c':'#c0392b';
     rows+=`<tr><td>${p[0]}</td><td class="n">${fmt(cpp)}</td><td class="n">${fc}%</td><td class="n pr">${fmt(price)}</td><td class="n pr">${fmt(precioPublico(price))}</td><td class="n">${fmt(mc)}</td><td class="n" style="color:${col};font-weight:bold">${mcPct.toFixed(0)}%</td><td class="n" style="color:${colN};font-weight:bold">${fmt(neta)}</td><td class="n" style="color:${colN};font-weight:bold">${rent.toFixed(0)}%</td></tr>`;
@@ -1719,7 +1742,7 @@ function printReport(){
   <div class="sub">Precio de venta sugerido por food cost objetivo · Generado el ${hoy}</div>
   <div class="kpis">
     <div class="kpi"><b>${allPlatos().length}</b>platos</div>
-    <div class="kpi"><b>${avgFc}%</b>food cost promedio</div>
+    <div class="kpi"><b>${avgFc}%</b>food cost promedio (sin bebidas)</div>
     <div class="kpi"><b>${fmt(tPrecio/allPlatos().length)}</b>precio promedio</div>
     <div class="kpi"><b>${fmt(actual)}</b>costo fijo mensual</div>
   </div>
@@ -1755,7 +1778,7 @@ function generateInforme(){
   const inc=STATE.incPct, vol=STATE.volumenMes;
   const actual=fixedActual();
   const fpp=vol>0?actual/vol:0;
-  const ds=allPlatos().map(p=>{const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p),mc=price-cpp,mcp=price>0?mc/price*100:0,neta=mc-fpp,rent=price>0?neta/price*100:0;return{n:p[0],sec:p[1],cpp,price,pub:precioPublico(price),fc,mc,mcp,neta,rent};});
+  const ds=allPlatos().map(p=>{const cpp=dishCostPerPortion(p),price=roundPrice(suggestedPrice(p)),fc=dishFoodCost(p),mc=price-cpp,mcp=price>0?mc/price*100:0,neta=isBev(p)?mc:mc-fpp,rent=price>0?neta/price*100:0;return{n:p[0],sec:p[1],cpp,price,pub:precioPublico(price),fc,mc,mcp,neta,rent};});
   const n=ds.length, avg=f=>ds.reduce((a,d)=>a+f(d),0)/n;
   const avgCosto=avg(d=>d.cpp),avgPrecio=avg(d=>d.price),avgPub=avg(d=>d.pub),avgMC=avg(d=>d.mc),avgMCpct=avg(d=>d.mcp),avgFc=avg(d=>d.fc),avgNeta=avg(d=>d.neta);
   const mcMes=avgMC*vol, resultado=mcMes-actual, equilibrio=avgMC>0?Math.ceil(actual/avgMC):0;
