@@ -1445,7 +1445,7 @@ function renderInventario(){
   items.forEach(it=>{
     const q=stockOf(it.id),m=minOf(it.id),cu=unitCostForInv(it),val=q*cu, low=m>0&&q<m;
     h+=`<tr data-name="${norm(it.name)}"${low?' style="background:rgba(224,102,102,.10)"':''}>
-      <td>${it.name}</td><td>${it.tipo==='beb'?'Bebida':(it.tipo==='sub'?'<span style="color:var(--accent)">Preparación</span>':'Insumo')}</td><td>${it.unit}</td>
+      <td>${it.name}</td><td>${it.tipo==='beb'?'Bebida':(it.tipo==='sub'?'<span style="color:var(--accent)">Sub-receta</span>':'Insumo')}</td><td>${it.unit}</td>
       <td class="num"><input class="cost" value="${q}" onchange="setInvQty('${it.id}',this.value)"></td>
       <td class="num"><input class="cost" style="width:70px" value="${m||''}" placeholder="0" onchange="setInvMin('${it.id}',this.value)"></td>
       <td class="num">${fmt2(cu)}</td><td class="num">${fmt(val)}</td></tr>`;
@@ -1464,7 +1464,7 @@ function renderMovs(){
   const itemsOpts=allInvItems().map(it=>`<option value="${it.name.replace(/"/g,'&quot;')}">`).join('');
   const ventaOpts=allPlatos().map(p=>`<option value="${p[0].replace(/"/g,'&quot;')}">`).join('')+invBebidas().map(b=>`<option value="${b.name.replace(/"/g,'&quot;')}">`).join('');
   const subOpts=invSubs().map(s=>`<option value="${s.name.replace(/"/g,'&quot;')}">`).join('');
-  let h=`<div class="card"><h2>Movimientos de inventario</h2><div class="hint">Registra entradas (compras), salidas, bajas, <b>producción de preparaciones</b> y ventas. Al vender un plato, se descuentan sus insumos crudos y las preparaciones (sub-recetas) ya hechas; al <b>producir</b> una preparación se descuentan sus insumos y se suma el producto terminado. Todo queda en el kardex.</div></div>
+  let h=`<div class="card"><h2>Movimientos de inventario</h2><div class="hint">Registra entradas (compras), salidas, bajas, <b>producción de sub-recetas</b> y ventas. Al vender un plato, se descuentan sus insumos crudos y las sub-recetas ya hechas; al <b>producir</b> una sub-receta se descuentan sus insumos y se suma el producto terminado. Todo queda en el kardex.</div></div>
   <div class="card"><h2 style="font-size:15px">📥 Entrada / Compra</h2><div class="controls">
     <input id="eItem" list="invItemsDL" placeholder="Ítem (insumo o bebida)" style="width:230px">
     <input id="eQty" type="number" placeholder="Cantidad" style="width:110px">
@@ -1481,10 +1481,10 @@ function renderMovs(){
     <input id="vItem" list="ventaDL" placeholder="Plato o bebida" style="width:280px">
     <input id="vQty" type="number" value="1" style="width:90px">
     <button class="btn" onclick="regVentaManual()">Registrar venta</button></div></div>
-  <div class="card"><h2 style="font-size:15px">🥘 Producción de preparaciones (mise-en-place)</h2>
-    <div class="hint">Al preparar un lote de una sub-receta (salsa, teriyaki…): descuenta sus insumos crudos del inventario y suma el producto terminado (en gramos) al stock de la preparación.</div>
+  <div class="card"><h2 style="font-size:15px">🥘 Producción de sub-recetas (mise-en-place)</h2>
+    <div class="hint">Al preparar un lote de una sub-receta (salsa, teriyaki…): descuenta sus insumos crudos del inventario y suma el producto terminado (en gramos) al stock de la sub-receta.</div>
     <div class="controls">
-      <input id="prItem" list="subDL" placeholder="Sub-receta / preparación" style="width:280px">
+      <input id="prItem" list="subDL" placeholder="Sub-receta" style="width:280px">
       <input id="prQty" type="number" value="1" style="width:90px" title="N° de lotes">
       <button class="btn" onclick="regProduccion()">Registrar producción</button>
     </div></div>
@@ -1509,7 +1509,7 @@ function renderMovs(){
 }
 function regProduccion(){
   const name=(document.getElementById('prItem').value||'').trim(); const n=parseFloat(document.getElementById('prQty').value)||1;
-  if(!name){alert('Escribe la preparación.');return;}
+  if(!name){alert('Escribe la sub-receta.');return;}
   if(!producir(name,n)){alert('No encontré esa sub-receta: '+name);return;}
   save();renderMovs();
 }
