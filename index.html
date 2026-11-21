@@ -629,6 +629,11 @@ function ensureDefaults(){
 function fixedList(){return STATE.fixedCosts||[];}
 function fixedActual(){return fixedList().filter(c=>c.active).reduce((a,c)=>a+(parseFloat(c.value)||0),0);}
 function fixedTotal(){return fixedList().reduce((a,c)=>a+(parseFloat(c.value)||0),0);}
+// nómina mensual (rubros activos cuyo nombre contiene "nomina") y el resto de fijos
+function nominaMensual(){return fixedList().filter(c=>c.active&&norm(c.name).includes('nomina')).reduce((a,c)=>a+(parseFloat(c.value)||0),0);}
+function otrosFijosMensual(){return fixedActual()-nominaMensual();}
+function nominaPorPlato(){const v=STATE.volumenMes;return v>0?nominaMensual()/v:0;}
+function otrosPorPlato(){const v=STATE.volumenMes;return v>0?otrosFijosMensual()/v:0;}
 ensureDefaults();
 // Valores iniciales $/unidad de receta para insumos "por pieza" (editables en Vinculación)
 const SEED={
@@ -1152,6 +1157,17 @@ function renderPlatos(){
           ${edited?`<button class="btn ghost" style="padding:5px 10px" onclick="resetDish('${E}')">↺ Restablecer receta original</button>`:''}
           <button class="btn ghost" style="padding:5px 10px" onclick="delPlato('${E}',${isCustom?1:0})">${isCustom?'🗑 Eliminar plato':'Ocultar plato'}</button>
         </div>
+        ${mp?(function(){const nom=nominaPorPlato(),otr=otrosPorPlato(),util=price-cpp-nom-otr,pc=x=>price>0?(x/price*100).toFixed(1)+'%':'—';
+          return `<div style="background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:12px;max-width:520px">
+          <div style="font-weight:700;color:var(--accent);margin-bottom:6px;font-size:13px">Estructura de costos · sobre el precio de ${fmt(price)}</div>
+          <table style="font-size:13px">
+            <tr><td>Materia prima (insumos)</td><td class="num">${fmt(cpp)}</td><td class="num"><b>${pc(cpp)}</b></td></tr>
+            <tr><td>Nómina</td><td class="num">${fmt(nom)}</td><td class="num"><b>${pc(nom)}</b></td></tr>
+            <tr><td>Otros costos fijos</td><td class="num">${fmt(otr)}</td><td class="num"><b>${pc(otr)}</b></td></tr>
+            <tr style="font-weight:700;border-top:2px solid var(--line)"><td>Utilidad neta</td><td class="num" style="color:${util>=0?'var(--green)':'var(--red)'}">${fmt(util)}</td><td class="num" style="color:${util>=0?'var(--green)':'var(--red)'}">${pc(util)}</td></tr>
+          </table>
+          <div class="hint" style="margin-top:4px">Nómina y otros fijos repartidos entre ${(+STATE.volumenMes).toLocaleString('es-CO')} platos/mes (ajústalo en 📈 Rentabilidad). El impoconsumo no se incluye (no es costo).</div>
+        </div>`;})():''}
         <table><thead><tr><th style="min-width:140px">Ingrediente</th><th class="num">Cant.</th><th>Und</th><th>Vinculado a (producto)</th><th class="num">$/und</th><th class="num">Costo</th><th></th></tr></thead><tbody>`;
     dishItems(p).forEach(([ing,qty,unit],j)=>{
       const l=costLine(ing,qty,unit);
