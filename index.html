@@ -617,6 +617,8 @@ function ensureDefaults(){
   STATE.customSubs = STATE.customSubs || [];       // [{n,y}] sub-recetas nuevas (items en subItems)
   STATE.subItems = STATE.subItems || {};           // sub -> items editados [[ing,qty,unit]]
   STATE.subYield = STATE.subYield || {};           // sub -> rendimiento editado
+  STATE.subMerma = STATE.subMerma || {};           // sub -> % merma por cocción (pierde peso al cocinar)
+  STATE.subTime = STATE.subTime || {};             // sub -> tiempo de producción (min)
   STATE.hiddenPlatos = STATE.hiddenPlatos || {};   // plato base -> true (ocultado)
   STATE.fixedCosts = STATE.fixedCosts || COSTOS_FIJOS.map(c=>({name:c[0],value:c[1],active:c[2]})); // costos fijos editables
   STATE.bebidas = STATE.bebidas || [];             // bebidas embotelladas (reventa): [{n,costo,precio}]
@@ -823,9 +825,15 @@ function subCostPerGram(subNorm){
     const cpu=ingCostPerUnit(ing,unit);
     if(cpu!=null){total+=cpu*qty;if(unit!=="ud")weight+=qty;}
   }
-  const cpg=weight>0?total/weight:null;
+  // merma por cocción: el lote pierde peso al cocinar → el gramo final cuesta más
+  const cm=subCookMerma(s[0]); const wFinal=weight*(cm>0?(1-cm/100):1);
+  const cpg=wFinal>0?total/wFinal:null;
   subCache[subNorm]=cpg;return cpg;
 }
+function subCookMerma(subName){const m=STATE.subMerma&&parseFloat(STATE.subMerma[subName]);return (m>0&&m<100)?m:0;}
+// peso crudo (suma g/ml de los ingredientes, sin contar ud)
+function subRawWeight(s){let w=0;for(const [ing,qty,unit] of s[2]){const k=norm(ing);if(isSub(k)){w+=qty;}else if(unit!=='ud'){w+=qty;}}return w;}
+function subFinalWeight(s){const cm=subCookMerma(s[0]);return subRawWeight(s)*(cm>0?(1-cm/100):1);}
 function subTotalCost(s){
   let total=0;
   for(const [ing,qty,unit] of s[2]){
@@ -887,11 +895,13 @@ function uid(){return 'm'+Date.now().toString(36)+Math.random().toString(36).sli
 // items de inventario: ingredientes (g/ml/ud) + bebidas embotelladas (ud)
 function invIngredients(){return uniqueIngredients().map(i=>({id:'ing:'+i.key,key:i.key,name:i.name,unit:ingUnitOf(i.name),tipo:'ing'}));}
 function invBebidas(){return (STATE.bebidas||[]).map(b=>({id:'beb:'+norm(b.n),key:norm(b.n),name:b.n,unit:'ud',tipo:'beb',costo:+b.costo||0}));}
-function allInvItems(){return invIngredients().concat(invBebidas());}
+// sub-recetas como preparaciones de inventario (mise-en-place), stock en gramos terminados
+function invSubs(){return subList().map(s=>({id:'sub:'+norm(s[0]),key:norm(s[0]),name:s[0],unit:'g',tipo:'sub'}));}
+function allInvItems(){return invIngredients().concat(invBebidas()).concat(invSubs());}
 function invItemById(id){return allInvItems().find(x=>x.id===id);}
 function stockOf(id){return (STATE.stock[id]&&+STATE.stock[id].qty)||0;}
 function minOf(id){return (STATE.stock[id]&&+STATE.stock[id].min)||0;}
-function unitCostForInv(it){return it.tipo==='beb'?(+it.costo||0):(rawCostPerUnit(it.name)||0);}
+function unitCostForInv(it){if(it.tipo==='beb')return +it.costo||0;if(it.tipo==='sub')return subCostPerGram(it.key)||0;return rawCostPerUnit(it.name)||0;}
 function itemUnitById(id){const it=invItemById(id);return it?it.unit:'';}
 // peso total (g/ml) de una sub-receta, para prorratear consumo
 function subTotalWeight(s){let w=0;for(const [ing,qty,unit] of s[2]){const k=norm(ing);if(isSub(k)){w+=qty;}else if(unit!=='ud'){w+=qty;}}return w;}
@@ -910,13 +920,32 @@ function applyMov(id,itemName,unit,delta,tipo,motivo,valor){
   STATE.stock[id].qty=(+STATE.stock[id].qty||0)+delta;
   STATE.movs.push({id:uid(),ts:Date.now(),itemId:id,itemName:itemName,unit:unit,tipo:tipo,qty:delta,motivo:motivo||'',valor:(valor==null?null:+valor)});
 }
-// vender N porciones de un plato: descuenta ingredientes; devuelve nº de líneas afectadas
+// vender N porciones de un plato: descuenta insumos crudos Y preparaciones (sub-recetas) ya hechas
 function sellDish(dishName,n,fecha){
   const p=allPlatos().find(x=>norm(x[0])===norm(dishName));if(!p)return 0;
-  const ex=explodeDish(p);let c=0;
-  for(const k in ex){const it=invIngredients().find(x=>x.key===k)||{id:'ing:'+k,name:ex[k].name,unit:ex[k].unit};
-    applyMov(it.id,ex[k].name,ex[k].unit||it.unit,-ex[k].qty*n,'venta','Venta '+n+'× '+p[0]);c++;}
+  let c=0;
+  for(const [ing,qty,unit] of dishItems(p)){
+    const k=norm(ing);
+    if(isSub(k)){ // descuenta de la preparación ya hecha (no explota a crudo)
+      applyMov('sub:'+k, subByNorm(k)[0], 'g', -(unit==='ud'?0:qty)*n, 'venta','Venta '+n+'× '+p[0]); c++;
+    } else {
+      const it=invIngredients().find(x=>x.key===k)||{id:'ing:'+k,name:ing,unit:ingUnitOf(ing)};
+      applyMov(it.id, ing, unit, -qty*n, 'venta','Venta '+n+'× '+p[0]); c++;
+    }
+  }
   return c;
+}
+// producir N lotes de una sub-receta: consume insumos crudos (y sub-recetas internas) y suma stock terminado
+function producir(subName,n){
+  const s=subList().find(x=>norm(x[0])===norm(subName)); if(!s)return false;
+  const sn=s[0];
+  for(const [ing,qty,unit] of s[2]){
+    const k=norm(ing);
+    if(isSub(k)){ applyMov('sub:'+k, subByNorm(k)[0], 'g', -(unit==='ud'?0:qty)*n, 'produccion','Producción '+n+'× '+sn); }
+    else { const it=invIngredients().find(x=>x.key===k)||{id:'ing:'+k,name:ing,unit:ingUnitOf(ing)}; applyMov(it.id, ing, unit, -qty*n, 'produccion','Producción '+n+'× '+sn); }
+  }
+  applyMov('sub:'+norm(sn), sn, 'g', subFinalWeight(s)*n, 'produccion','Producción '+n+'× '+sn);
+  return true;
 }
 function sellBebida(bebName,n){
   const it=invBebidas().find(x=>norm(x.name)===norm(bebName));if(!it)return false;
@@ -1062,14 +1091,14 @@ function renderRentabilidad(){
     <div class="hint" style="margin-top:8px">${resultado>=0?`✅ Con ${vol.toLocaleString('es-CO')} platos/mes cubres los fijos y te quedan <b>${fmt(resultado)}</b> de utilidad operativa.`:`⚠️ Con ${vol.toLocaleString('es-CO')} platos/mes NO alcanzas a cubrir los fijos (faltan ${fmt(-resultado)}). Necesitas vender al menos <b>${equilibrio.toLocaleString('es-CO')}</b> platos/mes.`}</div>
   </div>
   <div class="card"><h2>Margen de contribución por plato</h2>
-  <div class="hint">Ordena mentalmente: los platos con mayor <b>% de contribución</b> son los más rentables para impulsar en la carta. Precios redondeados a $100.</div>
-  <div class="scroll"><table><thead><tr><th>Plato</th><th>Sección</th><th class="num">Precio</th><th class="num">Costo insumos</th><th class="num">Margen contrib. $</th><th class="num">Margen contrib. %</th></tr></thead><tbody>`;
+  <div class="hint">El <b>margen de contribución se calcula sobre el precio NETO</b>. El <b>precio público</b> incluye el <b>${STATE.incPct}% de impoconsumo</b>, que <b>no es ingreso del restaurante</b> (se recauda y se traslada a la DIAN), por eso no entra al margen. Los platos con mayor <b>% de contribución</b> son los más rentables para impulsar. Precios redondeados a $100.</div>
+  <div class="scroll"><table><thead><tr><th>Plato</th><th>Sección</th><th class="num">Precio neto</th><th class="num">Precio público (+${STATE.incPct}%)</th><th class="num">Costo insumos</th><th class="num">Margen contrib. $</th><th class="num">Margen contrib. %</th></tr></thead><tbody>`;
   let sect="";_grp="";
   dishes.forEach(d=>{
-    h+=grpBanner(d.p,6);
-    if(d.p[1]!==sect){sect=d.p[1];h+=`<tr><td colspan="6" style="background:var(--panel2);color:var(--accent);font-weight:700">${sect}</td></tr>`;}
+    h+=grpBanner(d.p,7);
+    if(d.p[1]!==sect){sect=d.p[1];h+=`<tr><td colspan="7" style="background:var(--panel2);color:var(--accent);font-weight:700">${sect}</td></tr>`;}
     const col=d.mcPct>=70?'var(--green)':(d.mcPct>=60?'var(--accent2)':'var(--red)');
-    h+=`<tr><td><b>${d.p[0]}</b></td><td>${d.p[1]}</td><td class="num">${fmt(d.price)}</td><td class="num">${fmt(d.cpp)}</td><td class="num">${fmt(d.mc)}</td><td class="num" style="color:${col};font-weight:700">${d.mcPct.toFixed(0)}%</td></tr>`;
+    h+=`<tr><td><b>${d.p[0]}</b></td><td>${d.p[1]}</td><td class="num">${fmt(d.price)}</td><td class="num price">${fmt(precioPublico(d.price))}</td><td class="num">${fmt(d.cpp)}</td><td class="num">${fmt(d.mc)}</td><td class="num" style="color:${col};font-weight:700">${d.mcPct.toFixed(0)}%</td></tr>`;
   });
   h+=`</tbody></table></div></div>`;
   document.getElementById('tab-rentabilidad').innerHTML=h;
@@ -1081,6 +1110,11 @@ function toggleDish(n){OPEN.has(n)?OPEN.delete(n):OPEN.add(n);renderPlatos();}
 function productOptions(sel){return activeProducts().map(p=>`<option value="${p.n.replace(/"/g,'&quot;')}"${p.n===sel?' selected':''}>${p.n} (${fmt(prodPrice(p))}/${prodUnit(p)})</option>`).join('');}
 // llena las opciones del select solo al enfocarlo (rendimiento: evita 331 opciones × cientos de filas)
 function fillProd(sel){if(sel.dataset.filled)return;const cur=sel.value;sel.innerHTML='<option value="">— sin vincular —</option>'+productOptions('');sel.value=cur;sel.dataset.filled='1';}
+// Buscador escribible de insumos (datalist): se escribe y aparecen las opciones
+function prodDatalist(){return '<datalist id="prodDL">'+activeProducts().map(p=>`<option value="${p.n.replace(/"/g,'&quot;')}">${p.cat} · ${fmt(prodPrice(p))}/${prodUnit(p)}</option>`).join('')+'</datalist>';}
+function prodSearchInput(ing,curProd,maxw){
+  return `<input list="prodDL" class="prodsearch" style="width:100%;max-width:${maxw||260}px" value="${(curProd||'').replace(/"/g,'&quot;')}" placeholder="escribe para buscar insumo…" onchange="setProdForIng('${esc(ing)}',this.value)">`;
+}
 function renderPlatos(){
   const unitSel=(sel)=>['g','ml','ud'].map(u=>`<option${u===sel?' selected':''}>${u}</option>`).join('');
   let h=`<div class="card"><h2>Platos · receta editable</h2><div class="hint">Haz clic en un plato para abrirlo. Puedes <b>cambiar cantidades y unidades</b>, <b>el producto al que se vincula cada ingrediente</b> y su <b>$/unidad</b>, además de <b>agregar o quitar ingredientes</b>. Nota: el producto y el $/unidad de un ingrediente son compartidos por todos los platos que usen ese mismo nombre. Si quieres un costo distinto solo para este plato, cambia el nombre del ingrediente.</div>
@@ -1126,7 +1160,7 @@ function renderPlatos(){
       const curLbl = curProd?curProd.replace(/</g,'&lt;'):(l.mapped?'(auto)':'— sin vincular —');
       const linkCell = l.isSub
         ? `<span class="pill sub">sub-receta</span>`
-        : `<select class="map" style="max-width:260px" onfocus="fillProd(this)" onchange="setProdForIng('${esc(ing)}',this.value)"><option value="${curProd.replace(/"/g,'&quot;')}">${curLbl}</option></select>`;
+        : prodSearchInput(ing,curProd,260);
       const costEdit = l.isSub ? `${l.cpu!=null?fmt2(l.cpu):'—'}` : `<input class="cost" style="width:80px" value="${l.cpu!=null?(+l.cpu).toFixed(2):''}" onchange="setCostForIng('${esc(ing)}',this.value)">`;
       h+=`<tr>
         <td><input value="${(ing||'').replace(/"/g,'&quot;')}" style="width:140px" onchange="setItem('${E}',${j},'ing',this.value)"></td>
@@ -1140,14 +1174,24 @@ function renderPlatos(){
     });
     h+=`</tbody></table><button class="btn ghost" style="margin-top:10px" onclick="addItem('${E}')">➕ Agregar ingrediente</button></div></div>`;
   });
-  document.getElementById('tab-platos').innerHTML=h;
+  document.getElementById('tab-platos').innerHTML=h+prodDatalist();
 }
 function setItem(dn,j,field,val){const arr=ensureDishItems(dn);const idx={ing:0,qty:1,unit:2}[field];arr[j][idx]=field==='qty'?(parseFloat(val)||0):val;save();clearCache();renderPlatos();}
 function delItem(dn,j){const arr=ensureDishItems(dn);arr.splice(j,1);save();clearCache();renderPlatos();}
 function addItem(dn){const arr=ensureDishItems(dn);arr.push(["nuevo ingrediente",0,"g"]);OPEN.add(dn);save();renderPlatos();}
 function resetDish(dn){if(confirm('¿Restablecer la receta original de "'+dn+'"? Se perderán los cambios de ingredientes/cantidades de este plato.')){delete STATE.dishItems[dn];save();clearCache();renderPlatos();}}
 function refreshActive(){const a=document.querySelector('nav button.active');if(a)showTab(a.dataset.t);}
-function setProdForIng(ing,val){const k=norm(ing);STATE.map[k]=STATE.map[k]||{};if(val===''){delete STATE.map[k].prod;}else{STATE.map[k].prod=val;}STATE.map[k].costPerUnit="";save();clearCache();refreshActive();}
+function setProdForIng(ing,val){
+  const k=norm(ing);STATE.map[k]=STATE.map[k]||{};
+  val=(val||'').trim();
+  if(val===''){delete STATE.map[k].prod;}
+  else{
+    const p=activeProducts().find(x=>x.n===val)||activeProducts().find(x=>norm(x.n)===norm(val));
+    if(!p){toast('No existe ese insumo. Elige uno de la lista.',false);refreshActive();return;}
+    STATE.map[k].prod=p.n;
+  }
+  STATE.map[k].costPerUnit="";save();clearCache();refreshActive();
+}
 function setCostForIng(ing,val){const k=norm(ing);STATE.map[k]=STATE.map[k]||{};STATE.map[k].costPerUnit=val;save();clearCache();refreshActive();}
 function setDishPrice(dn,val){if(val===''||val==null||isNaN(parseFloat(val))){delete STATE.dishPrice[dn];}else{STATE.dishPrice[dn]=parseFloat(val);}save();refreshActive();}
 function addPlato(){
@@ -1192,8 +1236,15 @@ function renderSub(){
       <div class="dish-body">
         <div class="controls">
           <label>Rendimiento (porciones): <input type="number" class="foodcost-in" value="${s[1]}" onchange="setSubYield('${E}',this.value)"></label>
+          <label title="Peso que pierde el lote al cocinar (ej. una salsa que reduce). Sube el costo por gramo final.">Merma cocción %: <input type="number" class="foodcost-in" style="width:64px" value="${STATE.subMerma[sn]!=null&&STATE.subMerma[sn]!==''?STATE.subMerma[sn]:''}" placeholder="0" onchange="setSubMerma('${E}',this.value)"></label>
+          <label>Tiempo producción (min): <input type="number" class="foodcost-in" style="width:70px" value="${STATE.subTime[sn]!=null&&STATE.subTime[sn]!==''?STATE.subTime[sn]:''}" placeholder="—" onchange="setSubTime('${E}',this.value)"></label>
           ${edited?`<button class="btn ghost" style="padding:5px 10px" onclick="resetSub('${E}')">↺ Restablecer original</button>`:''}
           ${isCustom?`<button class="btn ghost" style="padding:5px 10px" onclick="delSub('${E}')">🗑 Eliminar</button>`:''}
+        </div>
+        <div class="controls" style="background:none;padding:4px 0;color:var(--muted);font-size:13px">
+          <span>Peso del lote: <b>${fmtN(subFinalWeight(s))} g</b>${subCookMerma(sn)>0?` <span style="font-size:11px">(crudo ${fmtN(subRawWeight(s))} g − ${subCookMerma(sn)}% cocción)</span>`:''}</span>
+          <span>Cantidad por porción: <b>${s[1]>0?fmtN(subFinalWeight(s)/s[1]):'—'} g</b></span>
+          ${STATE.subTime[sn]?`<span>Tiempo: <b>${STATE.subTime[sn]} min</b></span>`:''}
         </div>
         <table><thead><tr><th style="min-width:140px">Ingrediente</th><th class="num">Cant.</th><th>Und</th><th>Vinculado a (producto)</th><th class="num">$/und</th><th class="num">Costo</th><th></th></tr></thead><tbody>`;
     s[2].forEach(([ing,qty,unit],j)=>{
@@ -1202,7 +1253,7 @@ function renderSub(){
       const curLbl = curProd?curProd.replace(/</g,'&lt;'):(l.mapped?'(auto)':'— sin vincular —');
       const linkCell = l.isSub
         ? `<span class="pill sub">sub-receta</span>`
-        : `<select class="map" style="max-width:240px" onfocus="fillProd(this)" onchange="setProdForIng('${esc(ing)}',this.value)"><option value="${curProd.replace(/"/g,'&quot;')}">${curLbl}</option></select>`;
+        : prodSearchInput(ing,curProd,240);
       const costEdit = l.isSub ? `${l.cpu!=null?fmt2(l.cpu):'—'}` : `<input class="cost" style="width:80px" value="${l.cpu!=null?(+l.cpu).toFixed(2):''}" onchange="setCostForIng('${esc(ing)}',this.value)">`;
       h+=`<tr>
         <td><input value="${(ing||'').replace(/"/g,'&quot;')}" style="width:140px" onchange="setSubItem('${E}',${j},'ing',this.value)"></td>
@@ -1216,12 +1267,14 @@ function renderSub(){
     });
     h+=`</tbody></table><button class="btn ghost" style="margin-top:10px" onclick="addSubItem('${E}')">➕ Agregar ingrediente</button></div></div>`;
   });
-  document.getElementById('tab-subrecetas').innerHTML=h;
+  document.getElementById('tab-subrecetas').innerHTML=h+prodDatalist();
 }
 function setSubItem(sn,j,field,val){const arr=ensureSubItems(sn);const idx={ing:0,qty:1,unit:2}[field];arr[j][idx]=field==='qty'?(parseFloat(val)||0):val;save();clearCache();renderSub();}
 function delSubItem(sn,j){const arr=ensureSubItems(sn);arr.splice(j,1);save();clearCache();renderSub();}
 function addSubItem(sn){const arr=ensureSubItems(sn);arr.push(["nuevo ingrediente",0,"g"]);SUBOPEN.add(sn);save();clearCache();renderSub();}
 function setSubYield(sn,val){STATE.subYield[sn]=parseFloat(val)||1;save();clearCache();renderSub();}
+function setSubMerma(sn,val){if(val===''||val==null){delete STATE.subMerma[sn];}else{STATE.subMerma[sn]=parseFloat(val)||0;}save();clearCache();renderSub();}
+function setSubTime(sn,val){if(val===''||val==null){delete STATE.subTime[sn];}else{STATE.subTime[sn]=parseFloat(val)||0;}save();renderSub();}
 function resetSub(sn){if(confirm('¿Restablecer la sub-receta original "'+sn+'"?')){delete STATE.subItems[sn];delete STATE.subYield[sn];save();clearCache();renderSub();}}
 function addSub(){
   const n=(prompt('Nombre de la sub-receta nueva:')||'').trim(); if(!n)return;
@@ -1376,7 +1429,7 @@ function renderInventario(){
   items.forEach(it=>{
     const q=stockOf(it.id),m=minOf(it.id),cu=unitCostForInv(it),val=q*cu, low=m>0&&q<m;
     h+=`<tr data-name="${norm(it.name)}"${low?' style="background:rgba(224,102,102,.10)"':''}>
-      <td>${it.name}</td><td>${it.tipo==='beb'?'Bebida':'Insumo'}</td><td>${it.unit}</td>
+      <td>${it.name}</td><td>${it.tipo==='beb'?'Bebida':(it.tipo==='sub'?'<span style="color:var(--accent)">Preparación</span>':'Insumo')}</td><td>${it.unit}</td>
       <td class="num"><input class="cost" value="${q}" onchange="setInvQty('${it.id}',this.value)"></td>
       <td class="num"><input class="cost" style="width:70px" value="${m||''}" placeholder="0" onchange="setInvMin('${it.id}',this.value)"></td>
       <td class="num">${fmt2(cu)}</td><td class="num">${fmt(val)}</td></tr>`;
@@ -1394,7 +1447,8 @@ let BULK=[];
 function renderMovs(){
   const itemsOpts=allInvItems().map(it=>`<option value="${it.name.replace(/"/g,'&quot;')}">`).join('');
   const ventaOpts=allPlatos().map(p=>`<option value="${p[0].replace(/"/g,'&quot;')}">`).join('')+invBebidas().map(b=>`<option value="${b.name.replace(/"/g,'&quot;')}">`).join('');
-  let h=`<div class="card"><h2>Movimientos de inventario</h2><div class="hint">Registra entradas (compras), salidas, bajas (merma/daño) y ventas. Las <b>ventas descuentan los ingredientes según la receta</b> (y las sub-recetas). Todo queda en el kardex.</div></div>
+  const subOpts=invSubs().map(s=>`<option value="${s.name.replace(/"/g,'&quot;')}">`).join('');
+  let h=`<div class="card"><h2>Movimientos de inventario</h2><div class="hint">Registra entradas (compras), salidas, bajas, <b>producción de preparaciones</b> y ventas. Al vender un plato, se descuentan sus insumos crudos y las preparaciones (sub-recetas) ya hechas; al <b>producir</b> una preparación se descuentan sus insumos y se suma el producto terminado. Todo queda en el kardex.</div></div>
   <div class="card"><h2 style="font-size:15px">📥 Entrada / Compra</h2><div class="controls">
     <input id="eItem" list="invItemsDL" placeholder="Ítem (insumo o bebida)" style="width:230px">
     <input id="eQty" type="number" placeholder="Cantidad" style="width:110px">
@@ -1411,6 +1465,13 @@ function renderMovs(){
     <input id="vItem" list="ventaDL" placeholder="Plato o bebida" style="width:280px">
     <input id="vQty" type="number" value="1" style="width:90px">
     <button class="btn" onclick="regVentaManual()">Registrar venta</button></div></div>
+  <div class="card"><h2 style="font-size:15px">🥘 Producción de preparaciones (mise-en-place)</h2>
+    <div class="hint">Al preparar un lote de una sub-receta (salsa, teriyaki…): descuenta sus insumos crudos del inventario y suma el producto terminado (en gramos) al stock de la preparación.</div>
+    <div class="controls">
+      <input id="prItem" list="subDL" placeholder="Sub-receta / preparación" style="width:280px">
+      <input id="prQty" type="number" value="1" style="width:90px" title="N° de lotes">
+      <button class="btn" onclick="regProduccion()">Registrar producción</button>
+    </div></div>
   <div class="card"><h2 style="font-size:15px">📋 Carga masiva de ventas (reporte Pirpos)</h2>
     <div class="hint">Importa el archivo de ventas descargado de <b>Pirpos</b> (Excel .xlsx o CSV). Detecto las columnas <b>Producto</b> y <b>Cantidad</b> automáticamente, emparejo con tus platos/bebidas (los nombres nuevos los confirmas una vez y quedan recordados) y descuento el inventario. Solo descuenta lo que existe en Piso Cuatro; lo demás se ignora.</div>
     <div class="controls">
@@ -1427,8 +1488,14 @@ function renderMovs(){
   movs.forEach(m=>{const d=new Date(m.ts);const col=m.qty>=0?'var(--green)':'var(--red)';
     h+=`<tr data-name="${norm(m.itemName)}"><td>${d.toLocaleDateString('es-CO')} ${d.toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'})}</td><td>${m.itemName}</td><td>${m.tipo}</td><td class="num" style="color:${col}">${m.qty>=0?'+':''}${fmtN(m.qty)} ${m.unit||''}</td><td>${m.motivo||''}</td></tr>`;});
   h+=`</tbody></table></div></div>
-  <datalist id="invItemsDL">${itemsOpts}</datalist><datalist id="ventaDL">${ventaOpts}</datalist>`;
+  <datalist id="invItemsDL">${itemsOpts}</datalist><datalist id="ventaDL">${ventaOpts}</datalist><datalist id="subDL">${subOpts}</datalist>`;
   document.getElementById('tab-movimientos').innerHTML=h;
+}
+function regProduccion(){
+  const name=(document.getElementById('prItem').value||'').trim(); const n=parseFloat(document.getElementById('prQty').value)||1;
+  if(!name){alert('Escribe la preparación.');return;}
+  if(!producir(name,n)){alert('No encontré esa sub-receta: '+name);return;}
+  save();renderMovs();
 }
 function filterKardex(q){q=norm(q);document.querySelectorAll('#kardexTable tbody tr').forEach(tr=>{tr.style.display=tr.dataset.name.includes(q)?'':'none';});}
 function regEntrada(){
@@ -1531,6 +1598,12 @@ function renderVinc(){
   const optsFor=sel=>activeProducts().map(p=>`<option value="${p.n.replace(/"/g,'&quot;')}"${p.n===sel?' selected':''}>${p.n} · ${p.cat} (${fmt(prodPrice(p))}/${prodUnit(p)})</option>`).join('');
   let h=`<div class="card"><h2>Vinculación de ingredientes con insumos</h2>
   <div class="hint">Cada ingrediente se vincula a un producto; el "$/unidad base" es el precio de compra por gramo/ml/ud. La <b>% merma</b> es lo que se pierde al limpiar/pelar/deshuesar (ej. un aguacate con 30% de merma: de 100 g comprados solo rinden 70 g útiles). El sistema sube el costo real automáticamente: <b>$/efectivo = $/base ÷ (1 − merma)</b>. Ese efectivo es el que usan las recetas.</div>
+  <div class="controls">
+    <button class="btn ghost" onclick="downloadPlantillaVinc()">⬇ Descargar plantilla Excel</button>
+    <label class="btn">📥 Importar de Excel/CSV<input type="file" accept=".xlsx,.xls,.csv,.txt" style="display:none" onchange="importVincFile(this)"></label>
+    <span style="color:var(--muted);font-size:12px">Columnas: Ingrediente · Insumo · $/unidad · % merma · Precio insumo. Actualiza vinculación y precio del insumo.</span>
+  </div>
+  <div id="vincImportPreview"></div>
   <input class="search" placeholder="Buscar ingrediente..." oninput="filterVinc(this.value)">
   <div class="scroll"><table id="vincTable"><thead><tr><th>Ingrediente (receta)</th><th>Vincular a producto</th><th class="num">$/unidad base</th><th class="num">% merma</th><th class="num">$/efectivo</th><th>Estado</th></tr></thead><tbody>`;
   ings.forEach(ing=>{
@@ -1542,19 +1615,77 @@ function renderVinc(){
     const mapped=eff!=null;
     h+=`<tr data-name="${norm(ing.name)}">
       <td><b>${ing.name}</b></td>
-      <td><select class="map" onchange="setMap('${k.replace(/'/g,"\\'")}','prod',this.value)">
-        <option value=""${sel?'':' selected'}>— sin vincular —</option>${optsFor(sel)}</select></td>
+      <td>${prodSearchInput(ing.name, sel, 300)}</td>
       <td class="num"><input class="cost" style="width:80px" value="${m.costPerUnit!=null&&m.costPerUnit!==""?m.costPerUnit:(base!=null?base.toFixed(2):'')}" onchange="setMap('${k.replace(/'/g,"\\'")}','costPerUnit',this.value)"></td>
       <td class="num"><input class="cost" style="width:60px" value="${m.merma!=null&&m.merma!==""?m.merma:''}" placeholder="0" onchange="setMap('${k.replace(/'/g,"\\'")}','merma',this.value)"></td>
       <td class="num">${eff!=null?fmt2(eff):'—'}</td>
       <td>${CONFIRMADOS[k]!=null?'<span class="pill ok">✓ confirmado</span>':(mapped?'<span class="pill ok">vinculado</span>':'<span class="pill warn">pendiente</span>')}</td>
     </tr>`;
   });
-  h+=`</tbody></table></div></div>`;
+  h+=`</tbody></table></div></div>`+prodDatalist();
   document.getElementById('tab-vinculacion').innerHTML=h;
 }
 function setMap(k,field,val){STATE.map[k]=STATE.map[k]||{};STATE.map[k][field]=val;if(field==='prod')STATE.map[k].costPerUnit="";save();clearCache();renderVinc();}
 function filterVinc(q){q=norm(q);document.querySelectorAll('#vincTable tbody tr').forEach(tr=>{tr.style.display=tr.dataset.name.includes(q)?'':'none';});}
+/* --- Importar/exportar Vinculación desde Excel --- */
+let VINC=[];
+function downloadPlantillaVinc(){
+  let csv='Ingrediente,Insumo,$/unidad,% merma,Precio insumo\n';
+  uniqueIngredients().sort((a,b)=>a.name.localeCompare(b.name)).forEach(i=>{
+    const k=i.key,m=STATE.map[k]||{}; const cp=currentProdFor(i.name); const prodN=m.prod||(cp?cp.n:'');
+    const base=rawCostPerUnit(i.name); const merma=(m.merma!=null&&m.merma!=='')?m.merma:'';
+    const pobj=prodN?activeProducts().find(x=>x.n===prodN):null; const pprice=pobj?prodPrice(pobj):'';
+    csv+=`"${i.name.replace(/"/g,'""')}","${(prodN||'').replace(/"/g,'""')}",${base!=null?base.toFixed(2):''},${merma},${pprice}\n`;
+  });
+  const blob=new Blob(['﻿'+csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='plantilla_vinculacion_piso4.csv';a.click();
+}
+function importVincFile(input){
+  const f=input.files&&input.files[0]; if(!f)return; const name=f.name.toLowerCase();
+  if(name.endsWith('.xlsx')||name.endsWith('.xls')){
+    loadXLSX(function(){const rd=new FileReader();rd.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});const ws=wb.Sheets[wb.SheetNames[0]];procesarVincRows(XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''}));}catch(err){alert('No pude leer el Excel: '+err.message+'. Prueba con CSV.');}};rd.readAsArrayBuffer(f);});
+  } else { const rd=new FileReader();rd.onload=e=>procesarVincTexto(e.target.result);rd.readAsText(f,'utf-8'); }
+  input.value='';
+}
+function procesarVincTexto(txt){txt=String(txt).replace(/\r/g,'');const lines=txt.split('\n').filter(l=>l.trim());if(!lines.length){alert('Archivo vacío');return;}let d='\t';const hh=lines[0];if(hh.indexOf('\t')<0)d=(hh.split(';').length>=hh.split(',').length)?';':',';procesarVincRows(lines.map(l=>l.split(d)));}
+function procesarVincRows(rows){
+  if(!rows||!rows.length){alert('Sin datos');return;}
+  const hdr=(rows[0]||[]).map(s=>norm(String(s)));
+  const find=(...keys)=>{for(const kk of keys){const i=hdr.findIndex(s=>s.includes(kk));if(i>=0)return i;}return -1;};
+  const iIng=find('ingrediente'), iIns=find('insumo','producto'), iCost=find('unidad','costo'), iMer=find('merma'), iPre=find('precio');
+  if(iIng<0){alert('No encontré la columna "Ingrediente". Descarga la plantilla y úsala.');return;}
+  VINC=[];
+  for(let r=1;r<rows.length;r++){const c=rows[r]||[];const ing=String(c[iIng]==null?'':c[iIng]).trim();if(!ing)continue;
+    const insumo=iIns>=0?String(c[iIns]==null?'':c[iIns]).trim():'';
+    const costo=iCost>=0?parseFloat(String(c[iCost]).replace(',','.')):NaN;
+    const merma=iMer>=0?parseFloat(String(c[iMer]).replace(',','.')):NaN;
+    const precio=iPre>=0?parseFloat(String(c[iPre]).replace(/\./g,'').replace(',','.')):NaN;
+    const ex=uniqueIngredients().find(x=>norm(x.name)===norm(ing));
+    const insOk=insumo?!!activeProducts().find(x=>norm(x.n)===norm(insumo)):true;
+    VINC.push({ing,insumo,costo,merma,precio,ingOk:!!ex,insOk});
+  }
+  if(!VINC.length){alert('No encontré filas con Ingrediente');return;}
+  renderVincImportPreview();
+}
+function renderVincImportPreview(){
+  let h=`<div class="card" style="background:var(--panel2)"><h2 style="font-size:15px">Revisar e importar (${VINC.length} filas)</h2>
+  <div class="hint">Revisa antes de aplicar. Las filas marcadas con ⚠ no coinciden con un ingrediente/insumo existente y se omitirán.</div>
+  <div class="scroll"><table><thead><tr><th>Ingrediente</th><th>Insumo</th><th class="num">$/unidad</th><th class="num">% merma</th><th class="num">Precio insumo</th><th>Estado</th></tr></thead><tbody>`;
+  VINC.forEach(v=>{const bad=!v.ingOk||!v.insOk;
+    h+=`<tr><td>${v.ing}${v.ingOk?'':' <span class="tag-unmapped">⚠ no existe</span>'}</td><td>${v.insumo||'—'}${(v.insumo&&!v.insOk)?' <span class="tag-unmapped">⚠</span>':''}</td><td class="num">${isNaN(v.costo)?'—':fmt2(v.costo)}</td><td class="num">${isNaN(v.merma)?'—':v.merma+'%'}</td><td class="num">${isNaN(v.precio)?'—':fmt(v.precio)}</td><td>${bad?'<span class="pill warn">se omite</span>':'<span class="pill ok">ok</span>'}</td></tr>`;});
+  h+=`</tbody></table></div><div style="margin-top:10px"><button class="btn" onclick="aplicarVinc()">✅ Aplicar cambios</button> <button class="btn ghost" onclick="VINC=[];renderVinc()">Cancelar</button></div></div>`;
+  document.getElementById('vincImportPreview').innerHTML=h;
+}
+function aplicarVinc(){
+  let nMap=0,nPre=0,nMer=0;
+  VINC.forEach(v=>{ if(!v.ingOk)return; const k=norm(v.ing); STATE.map[k]=STATE.map[k]||{};
+    if(v.insumo&&v.insOk){const p=activeProducts().find(x=>norm(x.n)===norm(v.insumo));STATE.map[k].prod=p.n;nMap++;
+      if(!isNaN(v.precio)){STATE.priceOverride[p.n]=v.precio;nPre++;}}
+    if(!isNaN(v.costo))STATE.map[k].costPerUnit=v.costo;
+    if(!isNaN(v.merma)){STATE.map[k].merma=v.merma;nMer++;}
+  });
+  VINC=[];save();clearCache();renderVinc();
+  toast('✔ Importado: '+nMap+' vinculaciones · '+nPre+' precios · '+nMer+' mermas');
+}
 
 /* ---- INSUMOS ---- */
 const UNIDADES=["Gr","ml","Unidad","Bandeja"];
